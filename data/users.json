@@ -1,0 +1,126 @@
+[
+  {
+    "id": "usr_1788816001078_t1pu",
+    "username": "ashketchum",
+    "passwordHash": "0f2a6face57087e366142883339378babe6d1e53f49095b4627e70e6cccf6c44",
+    "displayName": "Ash Ketchum",
+    "coins": 8888,
+    "botLevel": 3,
+    "unlockedItems": [
+      "theme-emerald",
+      "frame-classic",
+      "tile-classic",
+      "line-laser",
+      "frame-gold"
+    ],
+    "equipped": {
+      "boardTheme": "theme-emerald",
+      "boardFrame": "frame-gold",
+      "tileStyle": "tile-classic",
+      "lineEffect": "line-laser"
+    },
+    "createdAt": 1788816001078,
+    "lastLogin": 1788816801686
+  },
+  {
+    "id": "usr_admin_master",
+    "username": "admin",
+    "passwordHash": "240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9",
+    "displayName": "Quản Trị Viên (Admin)",
+    "coins": 999999,
+    "maxBotLevel": 15,
+    "role": "admin",
+    "highScore": 99999,
+    "unlockedItems": [
+      "theme-emerald",
+      "theme-cyberpunk",
+      "theme-lava",
+      "theme-galaxy",
+      "theme-void",
+      "theme-sakura",
+      "theme-thunder",
+      "theme-glacier",
+      "frame-classic",
+      "frame-gold",
+      "frame-neon",
+      "frame-rainbow",
+      "frame-diamond",
+      "frame-dragon",
+      "frame-aurora",
+      "frame-mythic",
+      "tile-classic",
+      "tile-crystal",
+      "tile-golden",
+      "tile-amethyst",
+      "tile-jade",
+      "tile-prism",
+      "tile-imperial",
+      "tile-frost",
+      "line-laser",
+      "line-cyan",
+      "line-flame",
+      "line-rainbow",
+      "line-thunder",
+      "line-sakura",
+      "line-void",
+      "line-hyper"
+    ],
+    "equipped": {
+      "boardTheme": "theme-void",
+      "boardFrame": "frame-diamond",
+      "tileStyle": "tile-style-prism",
+      "lineEffect": "line-hyper"
+    },
+    "createdAt": "2026-09-07T21:32:41.852Z",
+    "lastLoginAt": "2026-09-07T21:32:41.852Z",
+    "lastLogin": 1788819543212,
+    "characterId": "paladin"
+  },
+  {
+    "id": "usr_1788816979300_xjmy",
+    "username": "minhlatoi2003",
+    "passwordHash": "96cae35ce8a9b0244178bf28e4966c2ce1b8385723a96a6b838858cdd6ca0a1e",
+    "displayName": "MInhdz",
+    "coins": 100,
+    "botLevel": 1,
+    "unlockedItems": [
+      "theme-emerald",
+      "frame-classic",
+      "tile-classic",
+      "line-laser"
+    ],
+    "equipped": {
+      "boardTheme": "theme-emerald",
+      "boardFrame": "frame-classic",
+      "tileStyle": "tile-classic",
+      "lineEffect": "line-laser"
+    },
+    "createdAt": 1788816979300,
+    "lastLogin": 1788820114203,
+    "rankPoints": 0,
+    "characterId": "satoshi"
+  },
+  {
+    "id": "usr_1788820139907_1hge",
+    "username": "thaonguyen123",
+    "passwordHash": "96cae35ce8a9b0244178bf28e4966c2ce1b8385723a96a6b838858cdd6ca0a1e",
+    "displayName": "thaonguyen",
+    "coins": 100,
+    "botLevel": 1,
+    "rankPoints": 0,
+    "unlockedItems": [
+      "theme-emerald",
+      "frame-classic",
+      "tile-classic",
+      "line-laser"
+    ],
+    "equipped": {
+      "boardTheme": "theme-emerald",
+      "boardFrame": "frame-classic",
+      "tileStyle": "tile-classic",
+      "lineEffect": "line-laser"
+    },
+    "createdAt": 1788820139907,
+    "lastLogin": 1788820139907
+  }
+]
