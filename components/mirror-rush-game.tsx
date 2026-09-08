@@ -1383,16 +1383,45 @@ export function MirrorRushGame() {
     }
   }, [inGame, playMode, gameOver, rivalBoard.length, isRivalFrozen, isRivalFogged, boardMode, dims.rows, dims.cols, score, rivalScore, soundEnabled])
 
-  // Online multiplayer sync
+  // Online multiplayer sync — Adaptive polling with since-param optimization
+  const lastSyncUpdatedAtRef = useRef<number>(0)
   useEffect(() => {
     if (!inGame || playMode !== 'pvp-online' || !roomCode) return
 
+    let currentInterval = 800 // Start at 800ms
+    let idleCount = 0
+    const FAST_INTERVAL = 800
+    const SLOW_INTERVAL = 1200
+
     const syncRoom = async () => {
       try {
-        const res = await fetch(`/api/rooms/${roomCode}`)
+        const sinceParam = lastSyncUpdatedAtRef.current > 0 ? `?since=${lastSyncUpdatedAtRef.current}` : ''
+        const res = await fetch(`/api/rooms/${roomCode}${sinceParam}`)
         const data = await res.json()
+
+        // No changes since last sync — skip all state updates
+        if (data.success && data.changed === false) {
+          idleCount++
+          // If idle for 3+ consecutive polls, slow down
+          if (idleCount >= 3 && currentInterval < SLOW_INTERVAL) {
+            currentInterval = SLOW_INTERVAL
+            if (syncTimerRef.current) clearInterval(syncTimerRef.current)
+            syncTimerRef.current = setInterval(syncRoom, currentInterval)
+          }
+          return
+        }
+
         if (data.success && data.room) {
+          // Activity detected — reset to fast polling
+          idleCount = 0
+          if (currentInterval > FAST_INTERVAL) {
+            currentInterval = FAST_INTERVAL
+            if (syncTimerRef.current) clearInterval(syncTimerRef.current)
+            syncTimerRef.current = setInterval(syncRoom, currentInterval)
+          }
+
           const room: RoomState = data.room
+          lastSyncUpdatedAtRef.current = room.updatedAt
           const me = isHost ? room.host : room.guest
           const opp = isHost ? room.guest : room.host
 
@@ -1442,9 +1471,12 @@ export function MirrorRushGame() {
       }
     }
 
-    syncTimerRef.current = setInterval(syncRoom, 400)
+    // Initial sync immediately
+    syncRoom()
+    syncTimerRef.current = setInterval(syncRoom, currentInterval)
     return () => {
       if (syncTimerRef.current) clearInterval(syncTimerRef.current)
+      lastSyncUpdatedAtRef.current = 0
     }
   }, [inGame, playMode, roomCode, isHost, playerId, soundEnabled])
 
@@ -1674,25 +1706,28 @@ export function MirrorRushGame() {
 
     setNotice(`NỐI THÀNH CÔNG! +${addedPoints} ĐIỂM ${newCombo > 1 ? `(${newCombo}x COMBO!)` : ''}`)
 
+    // Send match action to server IMMEDIATELY (don't wait for animation)
+    if (playMode === 'pvp-online' && roomCode) {
+      fetch(`/api/rooms/${roomCode}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          playerId,
+          action: {
+            type: 'match',
+            coordA: prevCoord,
+            coordB: coord,
+            points: addedPoints,
+            combo: newCombo,
+          },
+        }),
+      }).catch(() => { })
+    }
+
     setTimeout(() => {
       setLinkPath(null)
 
-      if (playMode === 'pvp-online' && roomCode) {
-        fetch(`/api/rooms/${roomCode}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            playerId,
-            action: {
-              type: 'match',
-              coordA: prevCoord,
-              coordB: coord,
-              points: addedPoints,
-              combo: newCombo,
-            },
-          }),
-        }).catch(() => { })
-      } else {
+      if (playMode !== 'pvp-online') {
         setBoard(cur => {
           const next = cur.map(r => [...r])
           next[prevCoord.row][prevCoord.col] = null
@@ -3084,6 +3119,16 @@ export function MirrorRushGame() {
   if (!inGame) {
     return (
       <main className="pikachu-app" style={{ position: 'relative', overflowX: 'hidden' }}>
+        {/* Portrait Orientation Lock Overlay - Mobile Only */}
+        <div className="portrait-lock-overlay">
+          <div className="portrait-lock-content">
+            <div className="portrait-lock-icon">📱</div>
+            <div className="portrait-lock-arrow">↻</div>
+            <h2 className="portrait-lock-title">Xoay Ngang Điện Thoại</h2>
+            <p className="portrait-lock-desc">Để có trải nghiệm chơi tốt nhất, vui lòng xoay ngang điện thoại của bạn!</p>
+            <div className="portrait-lock-hint">⚡ PIKACHU CLASSIC ⚡</div>
+          </div>
+        </div>
         {/* Nhúng Video YouTube vào Background của Menu */}
         <div className="lobby-video-bg">
           <iframe
@@ -3559,6 +3604,16 @@ export function MirrorRushGame() {
      ══════════════════════════════════════════════ */
   return (
     <main className="pikachu-app">
+      {/* Portrait Orientation Lock Overlay - Mobile Only */}
+      <div className="portrait-lock-overlay">
+        <div className="portrait-lock-content">
+          <div className="portrait-lock-icon">📱</div>
+          <div className="portrait-lock-arrow">↻</div>
+          <h2 className="portrait-lock-title">Xoay Ngang Điện Thoại</h2>
+          <p className="portrait-lock-desc">Để có trải nghiệm chơi tốt nhất, vui lòng xoay ngang điện thoại của bạn!</p>
+          <div className="portrait-lock-hint">⚡ PIKACHU CLASSIC ⚡</div>
+        </div>
+      </div>
       {/* Top Navigation Bar: Nút Về Menu & Trạng Thái Phòng */}
       <div className="top-nav-bar">
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
