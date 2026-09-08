@@ -725,6 +725,9 @@ export function updatePlayerAction(
     }
   } else if (action.type === 'shuffle' && action.newBoard) {
     player.board = action.newBoard
+    if (typeof action.points === 'number' && action.points > 0) {
+      player.score += action.points
+    }
   } else if (action.type === 'restart') {
     const newBoard = generateBoardData(room.size)
     room.host.board = newBoard.map(r => [...r])

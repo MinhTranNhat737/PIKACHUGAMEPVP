@@ -234,7 +234,7 @@ function createLocalBoard(sizeKey: GridSizeKey): Cell[][] {
    Sub-Component: Interactive Board
    ────────────────────────────────────────────── */
 function BoardView({
-  board, cols, rows, selected, onSelect, linkPath, hintPair, isRival = false, spriteTheme = 'artwork',
+  board, cols, rows, selected, onSelect, linkPath, hintPair, matchingPair = null, isRival = false, spriteTheme = 'artwork',
   tileStyle = 'tile-classic', lineEffect = 'line-laser',
   isScrambling = false, shockwaves = [], matchParticles = [], floatingPopups = [],
   activeSkillZaps = []
@@ -246,6 +246,7 @@ function BoardView({
   onSelect?: (coord: Coord) => void
   linkPath: Coord[] | null
   hintPair: [Coord, Coord] | null
+  matchingPair?: [Coord, Coord] | null
   isRival?: boolean
   spriteTheme?: SpriteTheme
   tileStyle?: string
@@ -285,6 +286,10 @@ function BoardView({
                 (hintPair[0].row === r && hintPair[0].col === c) ||
                 (hintPair[1].row === r && hintPair[1].col === c)
               )
+              const isMatching = matchingPair && (
+                (matchingPair[0].row === r && matchingPair[0].col === c) ||
+                (matchingPair[1].row === r && matchingPair[1].col === c)
+              )
               const isEmptyCell = cell === null
               const activeZap = !isEmptyCell ? (activeSkillZaps || []).find(z => z.row === r && z.col === c) : null
 
@@ -296,10 +301,11 @@ function BoardView({
                     isEmptyCell ? 'empty' : '',
                     isSelected ? 'selected' : '',
                     isHint ? 'hinted' : '',
+                    isMatching ? 'tile-matching' : '',
                     activeZap ? `elemental-zap elemental-zap-${activeZap.element}` : '',
                   ].filter(Boolean).join(' ')}
-                  onClick={() => !isRival && onSelect && onSelect({ row: r, col: c })}
-                  style={{ cursor: isRival ? 'default' : 'pointer' }}
+                  onClick={() => !isRival && !isMatching && onSelect && onSelect({ row: r, col: c })}
+                  style={{ cursor: isRival ? 'default' : isMatching ? 'default' : 'pointer' }}
                 >
                   {!isEmptyCell && (
                     <img
@@ -642,6 +648,8 @@ export function MirrorRushGame() {
   const [matchParticles, setMatchParticles] = useState<Array<{ id: string; x: number; y: number; color: string; tx: number; ty: number }>>([])
   const [floatingPopups, setFloatingPopups] = useState<Array<{ id: string; x: number; y: number; text: string; color: string }>>([])
   const [activeSkillZaps, setActiveSkillZaps] = useState<ElementalZap[]>([])
+  const [matchingPair, setMatchingPair] = useState<[Coord, Coord] | null>(null)
+  const isMatchingRef = useRef<boolean>(false)
 
   // Admin Management State
   const [showAdminModal, setShowAdminModal] = useState(false)
@@ -1432,12 +1440,18 @@ export function MirrorRushGame() {
           if (room.mode === 'shared' && room.sharedBoard) {
             setBoard(room.sharedBoard)
           } else if (me && me.board && me.board.length > 0) {
-            setBoard(me.board)
+            setBoard(cur => {
+              if (!cur || cur.length === 0) return me.board
+              // Never resurrect a cell that was already matched locally
+              return me.board.map((row, r) =>
+                row.map((cell, c) => (cur[r]?.[c] === null ? null : cell))
+              )
+            })
           }
 
           if (me) {
-            setScore(me.score)
-            setEnergy(me.energy)
+            setScore(prev => Math.max(prev, me.score))
+            setEnergy(prev => Math.max(prev, me.energy))
             setFrozenUntil(me.frozenUntil)
             setFogUntil(me.fogUntil)
           }
@@ -1594,7 +1608,7 @@ export function MirrorRushGame() {
 
   /* ─── Match Actions ─── */
   const onTileSelect = (coord: Coord) => {
-    if (gameOver || isMeFrozen) return
+    if (gameOver || isMeFrozen || isMatchingRef.current) return
     const cell = board[coord.row]?.[coord.col]
     if (cell === null) return
 
@@ -1611,22 +1625,42 @@ export function MirrorRushGame() {
       return
     }
 
+    // If clicking a DIFFERENT Pokemon icon: simply change selection without breaking combo!
+    const selectedCell = board[selected.row]?.[selected.col]
+    if (selectedCell !== cell) {
+      setSelected(coord)
+      playSound('select', soundEnabled)
+      return
+    }
+
+    // Both tiles have the SAME Pokemon: check for valid Pikachu link path (max 2 turns)
     const path = findLinkPath(board, selected, coord, dims.rows, dims.cols)
     const prevCoord = selected
     setSelected(null)
 
     if (!path) {
+      // Failed to link identical tiles (blocked by obstacles)
       setCombo(0)
       playSound('wrong', soundEnabled)
       setNotice('KHÔNG CÓ ĐƯỜNG NỐI HỢP LỆ (TỐI ĐA 2 KHÚC CUA)')
       return
     }
 
-    // Match success!
+    // MATCH SUCCESS!
+    // 1. Lock input and mark matching tiles so they cannot be clicked again
+    isMatchingRef.current = true
+    setMatchingPair([prevCoord, coord])
     setLinkPath(path)
     playSound('match', soundEnabled)
 
-    // Visual FX: Shockwaves, Star Particles & Floating Popups
+    const newCombo = combo + 1
+    let addedPoints = 10 + (newCombo > 1 ? newCombo * 5 : 0)
+    if (doubleScoreTurnsLeft > 0) {
+      addedPoints *= 2
+      setDoubleScoreTurnsLeft(d => Math.max(0, d - 1))
+    }
+
+    // Visual FX: Shockwaves & Particles
     const ptAx = ((prevCoord.col + 0.5) / dims.cols) * 100
     const ptAy = ((prevCoord.row + 0.5) / dims.rows) * 100
     const ptBx = ((coord.col + 0.5) / dims.cols) * 100
@@ -1639,7 +1673,6 @@ export function MirrorRushGame() {
     const swIdB = `sw_${Date.now()}_b`
     setShockwaves(prev => [...prev, { id: swIdA, x: ptAx, y: ptAy }, { id: swIdB, x: ptBx, y: ptBy }])
 
-    // Generate burst particles at both tile centers
     const fxColors = ['#f59e0b', '#ec4899', '#06b6d4', '#10b981', '#fbbf24', '#a855f7']
     const newParticles: Array<{ id: string; x: number; y: number; color: string; tx: number; ty: number }> = []
     for (let i = 0; i < 14; i++) {
@@ -1659,114 +1692,124 @@ export function MirrorRushGame() {
     }
     setMatchParticles(prev => [...prev, ...newParticles])
 
-    const newCombo = combo + 1
-    let addedPoints = 10 + (newCombo > 1 ? newCombo * 5 : 0)
-    if (doubleScoreTurnsLeft > 0) {
-      addedPoints *= 2
-      setDoubleScoreTurnsLeft(d => Math.max(0, d - 1))
-    }
-    const newScore = score + addedPoints
-    setScore(newScore)
-    setCombo(newCombo)
-    setEnergy(e => Math.min(100, e + 20))
-
-    // Character Reactions
-    if (newCombo >= 2) {
-      triggerPlayerEmotion('combo', 2200)
-    } else {
-      triggerPlayerEmotion('happy', 1400)
-    }
-    if (playMode !== 'solo') {
-      triggerRivalEmotion('sad', 1200)
-    }
-
-    // Floating score tag popup
-    const popups: Array<{ id: string; x: number; y: number; text: string; color: string }> = [
-      { id: `fp_${Date.now()}_pts`, x: midX, y: midY, text: `+${addedPoints} ✨`, color: '#fef08a' }
-    ]
-    if (newCombo > 1) {
-      popups.push({
-        id: `fp_${Date.now()}_combo`,
-        x: midX,
-        y: Math.max(5, midY - 9),
-        text: `COMBO x${newCombo}! 🔥`,
-        color: '#f97316'
-      })
-    }
-    setFloatingPopups(prev => [...prev, ...popups])
-
-    // Auto-clean visual effects after animation finishes
-    setTimeout(() => {
-      setShockwaves(prev => prev.filter(sw => sw.id !== swIdA && sw.id !== swIdB))
-      setMatchParticles(prev => prev.filter(pt => !newParticles.some(np => np.id === pt.id)))
-      setFloatingPopups(prev => prev.filter(fp => !popups.some(np => np.id === fp.id)))
-    }, 750)
-
-    if (newScore > highScore) {
-      setHighScore(newScore)
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('PIKA_HIGHSCORE', newScore.toString())
-      }
-      submitScoreToLeaderboard(newScore)
-    }
-
-    setNotice(`NỐI THÀNH CÔNG! +${addedPoints} ĐIỂM ${newCombo > 1 ? `(${newCombo}x COMBO!)` : ''}`)
-
-    // Send match action to server IMMEDIATELY (don't wait for animation)
-    if (playMode === 'pvp-online' && roomCode) {
-      fetch(`/api/rooms/${roomCode}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          playerId,
-          action: {
-            type: 'match',
-            coordA: prevCoord,
-            coordB: coord,
-            points: addedPoints,
-            combo: newCombo,
-          },
-        }),
-      }).catch(() => { })
-    }
-
+    // 2. WAIT FOR ANIMATION (220ms): TWO ICONS DISAPPEAR FIRST, AND ONLY THEN ARE POINTS & COMBO AWARDED!
     setTimeout(() => {
       setLinkPath(null)
+      setMatchingPair(null)
 
-      if (playMode !== 'pvp-online') {
-        setBoard(cur => {
-          const next = cur.map(r => [...r])
-          next[prevCoord.row][prevCoord.col] = null
-          next[coord.row][coord.col] = null
+      // Remove the 2 icons immediately on local board (applies to solo, bot, and pvp-online!)
+      setBoard(cur => {
+        const next = cur.map(r => [...r])
+        next[prevCoord.row][prevCoord.col] = null
+        next[coord.row][coord.col] = null
 
-          const remaining = next.flat().filter(c => c !== null).length
-          if (remaining === 0) {
-            setGameOver('win')
-            playSound('win', soundEnabled)
-            submitScoreToLeaderboard(newScore)
-            handleGameWin()
-          } else {
-            const pair = findAnyPair(next, dims.rows, dims.cols)
-            if (!pair) {
-              setNotice('HẾT CẶP KHẢ DỤNG · TỰ ĐỘNG ĐỔI VỊ TRÍ...')
-              let shuffled = shuffleBoard(next, dims.rows, dims.cols)
-              let tries = 0
-              while (!findAnyPair(shuffled, dims.rows, dims.cols) && tries < 30) {
-                shuffled = shuffleBoard(next, dims.rows, dims.cols)
-                tries++
-              }
-              return shuffled
+        const remaining = next.flat().filter(c => c !== null).length
+        if (remaining === 0) {
+          setGameOver('win')
+          playSound('win', soundEnabled)
+          handleGameWin()
+        } else {
+          const pair = findAnyPair(next, dims.rows, dims.cols)
+          if (!pair) {
+            setNotice('HẾT CẶP KHẢ DỤNG · TỰ ĐỘNG ĐỔI VỊ TRÍ...')
+            let shuffled = shuffleBoard(next, dims.rows, dims.cols)
+            let tries = 0
+            while (!findAnyPair(shuffled, dims.rows, dims.cols) && tries < 30) {
+              shuffled = shuffleBoard(next, dims.rows, dims.cols)
+              tries++
             }
+            if (playMode === 'pvp-online' && roomCode) {
+              fetch(`/api/rooms/${roomCode}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  playerId,
+                  action: { type: 'shuffle', newBoard: shuffled },
+                }),
+              }).catch(() => {})
+            }
+            return shuffled
           }
-          return next
+        }
+        return next
+      })
+
+      // NOW AND ONLY NOW: Award score, combo, energy & display score popup!
+      setScore(prev => {
+        const updated = prev + addedPoints
+        if (updated > highScore) {
+          setHighScore(updated)
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('PIKA_HIGHSCORE', updated.toString())
+          }
+          submitScoreToLeaderboard(updated)
+        }
+        return updated
+      })
+      setCombo(newCombo)
+      setEnergy(e => Math.min(100, e + 20))
+
+      // Character Reactions
+      if (newCombo >= 2) {
+        triggerPlayerEmotion('combo', 2200)
+      } else {
+        triggerPlayerEmotion('happy', 1400)
+      }
+      if (playMode !== 'solo') {
+        triggerRivalEmotion('sad', 1200)
+      }
+
+      // Floating score tag popup
+      const popups: Array<{ id: string; x: number; y: number; text: string; color: string }> = [
+        { id: `fp_${Date.now()}_pts`, x: midX, y: midY, text: `+${addedPoints} ✨`, color: '#fef08a' }
+      ]
+      if (newCombo > 1) {
+        popups.push({
+          id: `fp_${Date.now()}_combo`,
+          x: midX,
+          y: Math.max(5, midY - 9),
+          text: `COMBO x${newCombo}! 🔥`,
+          color: '#f97316'
         })
       }
-    }, 250)
+      setFloatingPopups(prev => [...prev, ...popups])
+
+      setTimeout(() => {
+        setShockwaves(prev => prev.filter(sw => sw.id !== swIdA && sw.id !== swIdB))
+        setMatchParticles(prev => prev.filter(pt => !newParticles.some(np => np.id === pt.id)))
+        setFloatingPopups(prev => prev.filter(fp => !popups.some(np => np.id === fp.id)))
+      }, 750)
+
+      setNotice(`NỐI THÀNH CÔNG! +${addedPoints} ĐIỂM ${newCombo > 1 ? `(${newCombo}x COMBO!)` : ''}`)
+
+      // Send match action to server
+      if (playMode === 'pvp-online' && roomCode) {
+        fetch(`/api/rooms/${roomCode}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            playerId,
+            action: {
+              type: 'match',
+              coordA: prevCoord,
+              coordB: coord,
+              points: addedPoints,
+              combo: newCombo,
+            },
+          }),
+        }).catch(() => { })
+      }
+
+      // Unlock input lock
+      isMatchingRef.current = false
+    }, 220)
   }
 
   /* ─── Active PVP Skills (Gây Bất Lợi Cho Đối Thủ) ─── */
   const triggerSkill = (skill: 'freeze' | 'scramble' | 'fog') => {
-    if (gameOver) return
+    if (gameOver || isMeFrozen) return
+    setSelected(null)
+    setHintPair(null)
 
     if (skill === 'freeze' && energy >= 30) {
       setEnergy(e => e - 30)
@@ -1822,6 +1865,9 @@ export function MirrorRushGame() {
   /* ─── Chiêu Thức Cuối (Ultimate Skills) Cho Từng Nhân Vật ─── */
   const triggerUltimateSkill = useCallback(() => {
     if (gameOver) return
+    setSelected(null)
+    setHintPair(null)
+
     const curChar = getCharacterById(selectedCharacterId)
     const cost = curChar.ultimate.energyCost
 
@@ -1867,6 +1913,20 @@ export function MirrorRushGame() {
         setBoard(newBoard)
         setScore(s => s + points)
         setActiveSkillZaps([])
+        if (playMode === 'pvp-online' && roomCode) {
+          fetch(`/api/rooms/${roomCode}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              playerId,
+              action: {
+                type: 'shuffle',
+                newBoard,
+                points,
+              },
+            }),
+          }).catch(() => { })
+        }
         if (onComplete) onComplete()
       }, 450)
     }
@@ -1969,7 +2029,7 @@ export function MirrorRushGame() {
         break
       }
     }
-  }, [gameOver, selectedCharacterId, energy, soundEnabled, playMode, board, dims.rows, dims.cols, doubleScoreTurnsLeft, triggerPlayerEmotion, triggerRivalEmotion])
+  }, [gameOver, selectedCharacterId, energy, soundEnabled, playMode, board, dims.rows, dims.cols, doubleScoreTurnsLeft, triggerPlayerEmotion, triggerRivalEmotion, roomCode, playerId])
 
   /* ─── Matchmaking Queue Operations ─── */
   const cancelMatchmakingQueue = useCallback(async () => {
@@ -3880,6 +3940,7 @@ export function MirrorRushGame() {
                 cols={dims.cols}
                 rows={dims.rows}
                 selected={selected}
+                matchingPair={matchingPair}
                 onSelect={onTileSelect}
                 linkPath={linkPath}
                 hintPair={hintPair}
@@ -3949,6 +4010,7 @@ export function MirrorRushGame() {
                 cols={dims.cols}
                 rows={dims.rows}
                 selected={selected}
+                matchingPair={matchingPair}
                 onSelect={onTileSelect}
                 linkPath={linkPath}
                 hintPair={hintPair}

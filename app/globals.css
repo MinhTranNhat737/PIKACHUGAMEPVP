@@ -4234,3 +4234,33 @@ select {
     gap: 2px !important;
   }
 }
+
+/* ══════════════════════════════════════════════
+   MATCHING DISSOLVE & ANTI-SPAM TILE EFFECT
+   ══════════════════════════════════════════════ */
+.pika-tile.tile-matching {
+  pointer-events: none !important;
+  animation: matchDisappear 0.22s cubic-bezier(0.2, 0.8, 0.2, 1) forwards !important;
+  z-index: 25;
+}
+
+@keyframes matchDisappear {
+  0% {
+    transform: scale(1);
+    filter: brightness(1);
+    box-shadow: 0 0 0px rgba(250, 204, 21, 0);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.16);
+    filter: brightness(1.7) drop-shadow(0 0 10px #facc15);
+    box-shadow: 0 0 18px #facc15, inset 0 0 12px #fef08a;
+    opacity: 0.85;
+  }
+  100% {
+    transform: scale(0.3);
+    filter: brightness(2.2);
+    box-shadow: 0 0 24px #facc15;
+    opacity: 0;
+  }
+}
