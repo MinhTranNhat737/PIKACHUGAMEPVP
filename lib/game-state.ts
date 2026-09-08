@@ -146,6 +146,35 @@ if (!globalThis.__PIKA_LEADERBOARD) {
 
 const rooms = globalThis.__PIKA_ROOMS!
 
+export type RoomListener = (room: RoomState) => void
+if (!(globalThis as any).__PIKA_ROOM_LISTENERS) {
+  (globalThis as any).__PIKA_ROOM_LISTENERS = new Map<string, Set<RoomListener>>()
+}
+const roomListeners: Map<string, Set<RoomListener>> = (globalThis as any).__PIKA_ROOM_LISTENERS
+
+export function subscribeRoom(code: string, listener: RoomListener): () => void {
+  const c = code.toUpperCase()
+  if (!roomListeners.has(c)) roomListeners.set(c, new Set())
+  roomListeners.get(c)!.add(listener)
+  return () => {
+    roomListeners.get(c)?.delete(listener)
+  }
+}
+
+export function broadcastRoom(room: RoomState) {
+  const c = room.code.toUpperCase()
+  const listeners = roomListeners.get(c)
+  if (listeners) {
+    for (const listener of listeners) {
+      try {
+        listener(room)
+      } catch (err) {
+        console.error('Room broadcast error:', err)
+      }
+    }
+  }
+}
+
 export function getLeaderboard(): LeaderboardEntry[] {
   if (!globalThis.__PIKA_LEADERBOARD) {
     globalThis.__PIKA_LEADERBOARD = []
@@ -805,6 +834,7 @@ export function createRoom(
   }
 
   rooms.set(room.code, room)
+  broadcastRoom(room)
   return room
 }
 
@@ -853,6 +883,7 @@ export function joinRoom(code: string, guestName: string, guestId: string): Room
       message: `🎮 ${guestName || 'Người chơi 2'} đã vào bàn! Bắt đầu tính giờ chiến đấu!`,
     }
     room.updatedAt = Date.now()
+    broadcastRoom(room)
   }
 
   return room
@@ -1016,6 +1047,7 @@ export function updatePlayerAction(
     room.lastAction = null
   }
 
+  broadcastRoom(room)
   return room
 }
 

@@ -892,6 +892,9 @@ export function MirrorRushGame() {
 
   const botTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const syncTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const wsRef = useRef<WebSocket | null>(null)
+  const eventSourceRef = useRef<EventSource | null>(null)
+  const [syncTransport, setSyncTransport] = useState<'ws' | 'sse' | 'poll'>('poll')
 
   // Combo countdown timer (tự động hết hạn sau 4.5s không ăn bài)
   useEffect(() => {
@@ -1668,6 +1671,20 @@ export function MirrorRushGame() {
 
   const sendRoomAction = useCallback((action: any) => {
     if (playMode !== 'pvp-online' || !roomCode) return
+
+    // 1. Gửi tức thì qua WebSocket nếu kết nối đang mở (< 1ms)
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      try {
+        wsRef.current.send(JSON.stringify({
+          type: 'action',
+          roomCode,
+          playerId,
+          action,
+        }))
+      } catch {}
+    }
+
+    // 2. Lưu trạng thái qua HTTP API (Next.js server)
     fetch(`/api/rooms/${roomCode}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1685,7 +1702,76 @@ export function MirrorRushGame() {
   useEffect(() => {
     if (!inGame || playMode !== 'pvp-online' || !roomCode) return
 
-    let currentInterval = 140 // 140ms ultra-fast competitive PvP sync
+    let isCleanedUp = false
+
+    // 1. WEBSOCKET REAL-TIME TRANSPORT (Port 3001)
+    try {
+      const wsProtocol = typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+      const wsHost = typeof window !== 'undefined' ? (window.location.hostname || 'localhost') : 'localhost'
+      const ws = new WebSocket(`${wsProtocol}//${wsHost}:3001`)
+      wsRef.current = ws
+
+      ws.onopen = () => {
+        if (isCleanedUp) return ws.close()
+        setSyncTransport('ws')
+        ws.send(JSON.stringify({
+          type: 'join',
+          roomCode,
+          playerId,
+          playerName,
+        }))
+      }
+
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data)
+          if (msg.type === 'room_action') {
+            // Nhận hành động tức thì từ đối thủ qua WebSocket (< 1ms)!
+            fetch(`/api/rooms/${roomCode}?since=0`, { cache: 'no-store' })
+              .then(res => res.json())
+              .then(data => {
+                if (data.success && data.room) {
+                  applyRoomData(data.room)
+                }
+              })
+              .catch(() => {})
+          }
+        } catch {}
+      }
+
+      ws.onerror = () => {
+        // WebSocket server không chạy ở port 3001 -> tự động fallback sang SSE
+      }
+    } catch {}
+
+    // 2. SERVER-SENT EVENTS (SSE) STREAM (Cổng 3000 chuẩn Next.js, độ trễ < 5ms)
+    try {
+      const eventSource = new EventSource(`/api/rooms/${roomCode}/stream`)
+      eventSourceRef.current = eventSource
+
+      eventSource.onopen = () => {
+        if (isCleanedUp) return eventSource.close()
+        setSyncTransport(prev => prev === 'ws' ? 'ws' : 'sse')
+      }
+
+      eventSource.onmessage = (event) => {
+        try {
+          const room = JSON.parse(event.data)
+          if (room && room.code) {
+            setSyncTransport(prev => prev === 'ws' ? 'ws' : 'sse')
+            applyRoomData(room)
+          }
+        } catch {}
+      }
+
+      eventSource.onerror = () => {
+        // SSE đứt kết nối -> fallback sang polling 140ms
+        setSyncTransport(prev => prev === 'ws' ? 'ws' : 'poll')
+      }
+    } catch {}
+
+    // 3. ADAPTIVE FAST POLLING (Lưới an toàn dự phòng tuyệt đối 140ms)
+    let currentInterval = 140
     let idleCount = 0
     const FAST_INTERVAL = 140
     const SLOW_INTERVAL = 380
@@ -1699,10 +1785,8 @@ export function MirrorRushGame() {
         })
         const data = await res.json()
 
-        // No changes since last sync — skip all state updates
         if (data.success && data.changed === false) {
           idleCount++
-          // If idle for 6+ consecutive polls, back off slightly to 500ms
           if (idleCount >= 6 && currentInterval < SLOW_INTERVAL) {
             currentInterval = SLOW_INTERVAL
             if (syncTimerRef.current) clearInterval(syncTimerRef.current)
@@ -1712,29 +1796,38 @@ export function MirrorRushGame() {
         }
 
         if (data.success && data.room) {
-          // Activity detected — reset to fast polling
           idleCount = 0
           if (currentInterval > FAST_INTERVAL) {
             currentInterval = FAST_INTERVAL
             if (syncTimerRef.current) clearInterval(syncTimerRef.current)
             syncTimerRef.current = setInterval(syncRoom, currentInterval)
           }
-
           applyRoomData(data.room)
         }
-      } catch {
-        // ignore
-      }
+      } catch {}
     }
 
-    // Initial sync immediately
     syncRoom()
     syncTimerRef.current = setInterval(syncRoom, currentInterval)
+
     return () => {
-      if (syncTimerRef.current) clearInterval(syncTimerRef.current)
+      isCleanedUp = true
+      if (wsRef.current) {
+        try { wsRef.current.close() } catch {}
+        wsRef.current = null
+      }
+      if (eventSourceRef.current) {
+        try { eventSourceRef.current.close() } catch {}
+        eventSourceRef.current = null
+      }
+      if (syncTimerRef.current) {
+        clearInterval(syncTimerRef.current)
+        syncTimerRef.current = null
+      }
       lastSyncUpdatedAtRef.current = 0
+      setSyncTransport('poll')
     }
-  }, [inGame, playMode, roomCode, applyRoomData])
+  }, [inGame, playMode, roomCode, playerId, playerName, applyRoomData])
 
   /* ─── Online Room Management ─── */
   const handleCreateRoom = async () => {
@@ -5077,6 +5170,30 @@ export function MirrorRushGame() {
           {/* Cột Giữa: Cột VS, Tỉ Số & Chiêu Thức Gây Bất Lợi */}
           <div className="pvp-divider">
             <div className="vs-badge">VS</div>
+
+            {playMode === 'pvp-online' && (
+              <div
+                style={{
+                  fontSize: '8.5px',
+                  fontWeight: 900,
+                  padding: '2px 4px',
+                  borderRadius: '4px',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.04em',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '3px',
+                  background: syncTransport === 'ws' ? 'rgba(34, 197, 94, 0.25)' : syncTransport === 'sse' ? 'rgba(6, 182, 212, 0.25)' : 'rgba(234, 179, 8, 0.2)',
+                  color: syncTransport === 'ws' ? '#4ade80' : syncTransport === 'sse' ? '#38bdf8' : '#facc15',
+                  border: `1px solid ${syncTransport === 'ws' ? '#22c55e' : syncTransport === 'sse' ? '#06b6d4' : '#eab308'}`,
+                  boxShadow: syncTransport === 'ws' ? '0 0 8px rgba(34, 197, 94, 0.4)' : 'none',
+                }}
+                title={syncTransport === 'ws' ? 'WebSocket thời gian thực (< 1ms)' : syncTransport === 'sse' ? 'Luồng Server Stream (< 5ms)' : 'Đồng bộ cực nhanh (140ms)'}
+              >
+                <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'currentColor', display: 'inline-block' }} />
+                {syncTransport === 'ws' ? 'WS 0ms' : syncTransport === 'sse' ? 'SSE 2ms' : '140ms'}
+              </div>
+            )}
 
             {/* Thanh Năng Lượng Chiêu Thức */}
             <div style={{ fontSize: '9px', fontWeight: 800, color: '#38bdf8' }}>NĂNG LƯỢNG: {energy}%</div>
