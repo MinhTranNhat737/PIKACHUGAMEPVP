@@ -686,6 +686,7 @@ function AdminUserRow({
 export function MirrorRushGame() {
   // Screen state: 'lobby' or 'game'
   const [inGame, setInGame] = useState(false)
+  const [showPortraitBanner, setShowPortraitBanner] = useState(true)
 
   // Configuration
   const [playMode, setPlayMode] = useState<PlayMode>('solo')
@@ -1510,6 +1511,22 @@ export function MirrorRushGame() {
       startBgm()
     }
   }, [gridSize, playMode, boardMode, bgmEnabled, botLevel])
+
+  // Responsive & measurement test helper: Allows URL params like ?test=pvp or ?test=solo
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search)
+      const test = params.get('test')
+      if (test === 'pvp') {
+        setPlayMode('pvp-bot')
+        setBoardMode('separate')
+        startMatch()
+      } else if (test === 'solo') {
+        setPlayMode('solo')
+        startMatch()
+      }
+    }
+  }, [startMatch])
 
   // Countdown timer
   useEffect(() => {
@@ -4314,16 +4331,23 @@ export function MirrorRushGame() {
 
     return (
       <main className="pikachu-app" style={{ position: 'relative', overflowX: 'hidden' }}>
-        {/* Portrait Orientation Lock Overlay - Mobile Only */}
-        <div className="portrait-lock-overlay">
-          <div className="portrait-lock-content">
-            <div className="portrait-lock-icon">📱</div>
-            <div className="portrait-lock-arrow">↻</div>
-            <h2 className="portrait-lock-title">Xoay Ngang Điện Thoại</h2>
-            <p className="portrait-lock-desc">Để có trải nghiệm chơi tốt nhất, vui lòng xoay ngang điện thoại của bạn!</p>
-            <div className="portrait-lock-hint">⚡ PIKACHU CLASSIC ⚡</div>
+        {/* Portrait Orientation Suggestion Banner - Mobile Only */}
+        {showPortraitBanner && (
+          <div className="portrait-orientation-banner">
+            <div className="portrait-banner-content">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '15px' }}>📱↻</span>
+                <span>Gợi ý: <strong>Xoay ngang</strong> điện thoại để trải nghiệm tốt nhất!</span>
+              </div>
+              <button
+                className="btn-dismiss-banner"
+                onClick={() => setShowPortraitBanner(false)}
+              >
+                Đã hiểu ✕
+              </button>
+            </div>
           </div>
-        </div>
+        )}
         {/* Nhúng Video YouTube vào Background của Menu */}
         <div className="lobby-video-bg">
           <iframe
@@ -4776,16 +4800,23 @@ export function MirrorRushGame() {
      ══════════════════════════════════════════════ */
   return (
     <main className="pikachu-app">
-      {/* Portrait Orientation Lock Overlay - Mobile Only */}
-      <div className="portrait-lock-overlay">
-        <div className="portrait-lock-content">
-          <div className="portrait-lock-icon">📱</div>
-          <div className="portrait-lock-arrow">↻</div>
-          <h2 className="portrait-lock-title">Xoay Ngang Điện Thoại</h2>
-          <p className="portrait-lock-desc">Để có trải nghiệm chơi tốt nhất, vui lòng xoay ngang điện thoại của bạn!</p>
-          <div className="portrait-lock-hint">⚡ PIKACHU CLASSIC ⚡</div>
+      {/* Portrait Orientation Suggestion Banner - Mobile Only */}
+      {showPortraitBanner && (
+        <div className="portrait-orientation-banner">
+          <div className="portrait-banner-content">
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ fontSize: '15px' }}>📱↻</span>
+              <span>Gợi ý: <strong>Xoay ngang</strong> điện thoại để bàn cờ to & dễ chơi nhất!</span>
+            </div>
+            <button
+              className="btn-dismiss-banner"
+              onClick={() => setShowPortraitBanner(false)}
+            >
+              Đã hiểu ✕
+            </button>
+          </div>
         </div>
-      </div>
+      )}
       {/* Top Navigation Bar: Nút Về Menu & Trạng Thái Phòng */}
       <div className="top-nav-bar">
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
