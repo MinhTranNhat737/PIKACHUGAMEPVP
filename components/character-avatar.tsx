@@ -1,32 +1,91 @@
 'use client'
 
-import React from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { CharacterEmotion, PixelCharacter, getCharacterById } from '@/lib/character-catalog'
 
 interface CharacterAvatarProps {
   characterId?: string
   emotion?: CharacterEmotion
-  size?: 'sm' | 'md' | 'lg' | 'hero'
+  size?: 'sm' | 'md' | 'lg' | 'hero' | 'showcase' | 'standee'
+  shape?: 'circle' | 'rect'
   showSpeech?: boolean
   showBadge?: boolean
   showUltimateBadge?: boolean
   onClick?: () => void
   interactive?: boolean
+  useVideo?: boolean
+  domId?: string
+  cutout?: boolean
 }
 
 export function CharacterAvatar({
   characterId = 'satoshi',
   emotion = 'idle',
   size = 'md',
+  shape,
   showSpeech = false,
   showBadge = false,
   showUltimateBadge = false,
   onClick,
   interactive = false,
+  useVideo = true,
+  domId,
+  cutout = false,
 }: CharacterAvatarProps) {
   const char = getCharacterById(characterId)
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const [videoLoaded, setVideoLoaded] = useState(false)
+  const [hasVideoError, setHasVideoError] = useState(false)
 
-  const sizePixels = size === 'sm' ? 42 : size === 'md' ? 68 : size === 'lg' ? 96 : 130
+  const isStandee = size === 'standee'
+  const isShowcase = size === 'showcase'
+  const isRect = shape === 'rect' || cutout || isShowcase || isStandee
+  const widthPixels = size === 'sm' ? 56 : size === 'md' ? 84 : size === 'lg' ? 128 : size === 'hero' ? 175 : isStandee ? 250 : 290
+  const heightPixels = isShowcase ? 360 : isStandee ? 310 : (isRect ? Math.round(widthPixels * 1.25) : widthPixels)
+
+  // Video source according to the 3 characters: Satoshi, Madara, Himeko
+  const videoSrc = char.videoSrc || (char.id === 'madara' || char.id === 'maldara' ? '/maldara.mp4' : char.id === 'himeko' ? '/himeko.mp4' : '/shatoshi.mp4')
+
+  useEffect(() => {
+    setHasVideoError(false)
+    const v = videoRef.current
+    if (v && v.readyState >= 2) {
+      setVideoLoaded(true)
+    }
+  }, [videoSrc])
+
+  // React to emotion by controlling video playback & seeking to the exact clip
+  useEffect(() => {
+    const v = videoRef.current
+    if (!v || !useVideo || hasVideoError) return
+
+    try {
+      if (emotion === 'win') {
+        // Chiến thắng: Phát đoạn kết đỉnh cao (~6.0s - 10s)
+        v.currentTime = 6.0
+        v.play().catch(() => {})
+      } else if (emotion === 'happy' || emotion === 'combo') {
+        // Ăn điểm / Combo: Phát đoạn hành động ăn mừng (~1.5s - 4.5s)
+        v.currentTime = 1.5
+        v.play().catch(() => {})
+        const t = setTimeout(() => {
+          if (v) {
+            v.pause()
+            v.currentTime = 0.5 // quay lại tư thế chuẩn bị
+          }
+        }, 2400)
+        return () => clearTimeout(t)
+      } else if (emotion === 'lose' || emotion === 'sad') {
+        // Thất bại / Thua điểm
+        v.currentTime = 0.5
+        v.pause()
+      } else {
+        // Idle: giữ khung hình chuẩn bị đầu video
+        v.currentTime = 0.5
+        v.pause()
+      }
+    } catch {}
+  }, [emotion, useVideo, hasVideoError, videoSrc])
 
   // SVG Pixel art character faces/sprites with distinct colors, outfits, hairstyles, and facial expressions
   const renderPixelSprite = () => {
@@ -81,6 +140,35 @@ export function CharacterAvatar({
           </g>
         )
       }
+      if (char.avatarType === 'madara') {
+        // Red Sharingan eyes
+        return (
+          <g>
+            <circle cx="17" cy="19" r="4.5" fill="#dc2626" />
+            <circle cx="31" cy="19" r="4.5" fill="#dc2626" />
+            <circle cx="17" cy="19" r="2" fill="#000000" />
+            <circle cx="31" cy="19" r="2" fill="#000000" />
+            <circle cx="15.5" cy="17.5" r="0.9" fill="#000000" />
+            <circle cx="29.5" cy="17.5" r="0.9" fill="#000000" />
+            <circle cx="18" cy="17" r="1.2" fill="#ffffff" opacity="0.6" />
+            <circle cx="32" cy="17" r="1.2" fill="#ffffff" opacity="0.6" />
+          </g>
+        )
+      }
+      if (char.avatarType === 'himeko') {
+        // Radiant golden amber eyes
+        return (
+          <g>
+            <ellipse cx="17" cy="19" rx="3.5" ry="4" fill="#d97706" />
+            <ellipse cx="31" cy="19" rx="3.5" ry="4" fill="#d97706" />
+            <circle cx="18" cy="17.5" r="1.5" fill="#ffffff" />
+            <circle cx="32" cy="17.5" r="1.5" fill="#ffffff" />
+            <circle cx="16" cy="20.5" r="0.8" fill="#fef08a" />
+            <circle cx="30" cy="20.5" r="0.8" fill="#fef08a" />
+          </g>
+        )
+      }
+
       // Normal cute eyes
       return (
         <g fill="#0f172a">
@@ -107,6 +195,33 @@ export function CharacterAvatar({
               <path d="M 8 16 Q 24 14 42 16 L 46 17 L 38 19 L 10 19 Z" fill="#ffffff" />
               {/* Green poke logo mark on cap */}
               <circle cx="24" cy="11" r="3" fill="#22c55e" />
+            </g>
+          )
+        case 'madara':
+          return (
+            <g>
+              {/* Spiky wild long black hair */}
+              <path d="M 6 18 L 1 10 L 8 11 L 4 3 L 14 6 L 24 1 L 34 6 L 44 3 L 40 11 L 47 10 L 42 18 L 46 26 L 41 36 L 36 32 L 38 42 L 32 38 L 16 38 L 10 42 L 12 32 L 7 36 L 2 26 Z" fill="#0f172a" />
+              {/* Konoha Headband */}
+              <rect x="10" y="10" width="28" height="5.5" rx="1" fill="#1e293b" />
+              {/* Metal Protector Plate */}
+              <rect x="18" y="10.5" width="12" height="4.5" rx="1" fill="#94a3b8" />
+              {/* High collar armor */}
+              <path d="M 6 36 L 14 26 L 18 36 L 30 36 L 34 26 L 42 36 Z" fill="#dc2626" stroke="#991b1b" strokeWidth="1" />
+            </g>
+          )
+        case 'himeko':
+          return (
+            <g>
+              {/* Voluminous flowing crimson hair */}
+              <path d="M 8 16 C 6 2, 42 2, 40 16 L 46 28 C 48 38, 38 42, 36 38 L 38 46 L 30 40 L 18 40 L 10 46 L 12 38 C 10 42, 0 38, 2 28 Z" fill="#dc2626" />
+              {/* Golden rose hairpin */}
+              <circle cx="34" cy="12" r="3.5" fill="#facc15" />
+              <circle cx="34" cy="12" r="2" fill="#ea580c" />
+              {/* Front hair fringe */}
+              <path d="M 12 14 L 16 22 L 20 14 L 28 14 L 32 22 L 36 14 Z" fill="#ef4444" />
+              {/* Elegant white and gold collar */}
+              <path d="M 16 36 L 24 40 L 32 36 Z" fill="#ffffff" stroke="#facc15" strokeWidth="1" />
             </g>
           )
         case 'kasumi':
@@ -191,8 +306,8 @@ export function CharacterAvatar({
     return (
       <svg
         viewBox="0 0 48 48"
-        width={sizePixels}
-        height={sizePixels}
+        width={widthPixels}
+        height={heightPixels}
         className={`pixel-character-svg emotion-${emotion}`}
         style={{ overflow: 'visible' }}
       >
@@ -287,6 +402,7 @@ export function CharacterAvatar({
 
   return (
     <div
+      id={domId}
       className={`character-avatar-container char-${char.id} emotion-${emotion} ${interactive ? 'interactive' : ''}`}
       onClick={onClick}
       style={{
@@ -304,20 +420,66 @@ export function CharacterAvatar({
         </div>
       )}
 
-      {/* Main Pixel Character SVG Box */}
+      {/* Main Character Box: Video Avatar or Pixel SVG */}
       <div
-        className={`character-sprite-box emotion-${emotion}`}
+        className={`character-sprite-box emotion-${emotion} ${isRect ? 'is-cutout' : ''}`}
         style={{
-          width: sizePixels,
-          height: sizePixels,
-          borderRadius: '50%',
+          width: widthPixels,
+          height: heightPixels,
+          borderRadius: isRect ? '18px' : '50%',
           display: 'flex',
           justifyContent: 'center',
           alignItems: 'center',
           position: 'relative',
+          overflow: 'hidden',
+          boxShadow: isRect ? `0 14px 38px ${char.glowColor}50, 0 0 24px ${char.glowColor}30` : `0 0 18px ${char.glowColor}`,
+          border: isRect ? `2.5px solid ${char.accentColor}` : `2px solid ${char.accentColor}`,
+          background: isRect ? 'linear-gradient(180deg, rgba(15,23,42,0.4) 0%, rgba(10,15,30,0.92) 100%)' : '#0f172a',
         }}
       >
-        {renderPixelSprite()}
+        {useVideo && !hasVideoError ? (
+          <>
+            <video
+              key={videoSrc}
+              ref={videoRef}
+              src={videoSrc}
+              muted
+              playsInline
+              autoPlay
+              loop
+              preload="auto"
+              onLoadedData={() => {
+                setVideoLoaded(true)
+                if (videoRef.current && emotion === 'idle') {
+                  try {
+                    videoRef.current.currentTime = 0.5
+                  } catch {}
+                }
+              }}
+              onCanPlay={() => setVideoLoaded(true)}
+              onPlay={() => setVideoLoaded(true)}
+              onError={() => setHasVideoError(true)}
+              style={{
+                position: 'absolute',
+                inset: 0,
+                width: '100%',
+                height: '100%',
+                objectFit: 'cover',
+                objectPosition: isRect
+                  ? (char.showcasePosition || (char.id === 'satoshi' ? 'center 58%' : char.id === 'madara' || char.id === 'maldara' ? 'center 48%' : 'center 46%'))
+                  : (char.avatarPosition || (char.id === 'satoshi' ? 'center 64%' : char.id === 'madara' || char.id === 'maldara' ? 'center 52%' : 'center 50%')),
+                transform: isRect ? 'scale(1.02)' : `scale(${char.avatarScale ?? 1.05})`,
+                opacity: videoLoaded ? 1 : 0.01,
+                zIndex: 2,
+              }}
+            />
+            <div style={{ opacity: videoLoaded ? 0 : 1, transition: 'opacity 0.2s ease', pointerEvents: 'none', width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              {renderPixelSprite()}
+            </div>
+          </>
+        ) : (
+          renderPixelSprite()
+        )}
 
         {/* Victory 1st Podium Plate */}
         {emotion === 'win' && (

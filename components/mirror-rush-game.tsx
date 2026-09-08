@@ -4,13 +4,14 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Volume2, VolumeX, Shuffle, Lightbulb, RotateCcw,
   Trophy, Users, User, Bot, Sparkles, Snowflake, Wind, EyeOff,
-  Copy, Check, DoorOpen, LogOut, ArrowRight, ShieldAlert, Music,
+  Copy, Check, DoorOpen, LogOut, ArrowRight, ArrowLeft, ShieldAlert, Music,
   Coins, ShoppingBag, Lock, Unlock, KeyRound, LogIn, BookOpen
 } from 'lucide-react'
-import { playSound, startBgm, stopBgm, getIsBgmPlaying } from '@/lib/sound'
+import { playSound, startBgm, stopBgm, getIsBgmPlaying, autoUnlockAudio, isAudioRunning, subscribeAudioReady } from '@/lib/sound'
 import { GridSizeKey, BoardMode, GRID_DIMS, Cell, Coord, RoomState, LeaderboardEntry, BOT_LEVELS, BotLevelConfig, getRankTier } from '@/lib/game-state'
 import { SHOP_CATALOG, ShopItem, UserAccount } from '@/lib/shop-catalog'
 import { CharacterAvatar } from '@/components/character-avatar'
+import { AvatarSkillBeams, AvatarSkillBeam } from '@/components/avatar-skill-beams'
 import { CHARACTERS, CharacterEmotion, getCharacterById, UltimateSkill, PixelCharacter } from '@/lib/character-catalog'
 
 export type SpriteTheme = 'artwork' | 'retro' | 'home'
@@ -197,6 +198,142 @@ function shuffleBoard(board: Cell[][], rows: number, cols: number): Cell[][] {
   return newBoard
 }
 
+// Thuật toán đảm bảo bàn cờ luôn luôn giải được (ít nhất 1 cặp nối hợp lệ), không bao giờ bế tắc
+function ensureSolvableBoard(board: Cell[][], rows: number, cols: number): Cell[][] {
+  const remainingPositions: Coord[] = []
+  const valCount = new Map<number, number>()
+
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const v = board[r]?.[c]
+      if (v !== null && v !== undefined) {
+        remainingPositions.push({ row: r, col: c })
+        valCount.set(v, (valCount.get(v) || 0) + 1)
+      }
+    }
+  }
+
+  if (remainingPositions.length <= 1) return board
+
+  // 1. Sửa lỗi Parity (tính chẵn lẻ): Đảm bảo mọi Pokémon đều có số lượng chẵn (ít nhất 1 cặp)
+  // Tránh trường hợp có quân cờ mồ côi không bao giờ nối được
+  let current = board.map(row => [...row])
+  const oddVals: number[] = []
+  for (const [val, count] of valCount.entries()) {
+    if (count % 2 !== 0) oddVals.push(val)
+  }
+
+  if (oddVals.length > 0) {
+    for (let i = 0; i + 1 < oddVals.length; i += 2) {
+      const vKeep = oddVals[i]
+      const vReplace = oddVals[i + 1]
+      for (const p of remainingPositions) {
+        if (current[p.row][p.col] === vReplace) {
+          current[p.row][p.col] = vKeep
+          break
+        }
+      }
+    }
+    if (oddVals.length % 2 !== 0) {
+      const loneVal = oddVals[oddVals.length - 1]
+      const mostCommon = Array.from(valCount.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] || 25
+      for (const p of remainingPositions) {
+        if (current[p.row][p.col] === loneVal) {
+          current[p.row][p.col] = mostCommon
+          break
+        }
+      }
+    }
+  }
+
+  // 2. Nếu bàn cờ hiện tại đã có ít nhất 1 cặp nối hợp lệ thì giữ nguyên
+  if (findAnyPair(current, rows, cols)) return current
+
+  // 3. Xáo trộn ngẫu nhiên tối đa 60 lần
+  for (let t = 0; t < 60; t++) {
+    current = shuffleBoard(current, rows, cols)
+    if (findAnyPair(current, rows, cols)) {
+      return current
+    }
+  }
+
+  // 4. Thuật toán tất định (Deterministic Solver) đảm bảo 100% CÓ CẶP NỐI:
+  // Duyệt qua tất cả các cặp vị trí còn lại (pA, pB).
+  // Kiểm tra xem có cặp vị trí nào mà đường đi Pikachu giữa chúng hợp lệ qua các ô trống không.
+  const allVals = remainingPositions.map(p => current[p.row][p.col]!)
+  const counts = new Map<number, number>()
+  for (const v of allVals) counts.set(v, (counts.get(v) || 0) + 1)
+  let targetVal: number = allVals[0]
+  for (const [v, cnt] of counts.entries()) {
+    if (cnt >= 2) {
+      targetVal = v
+      break
+    }
+  }
+
+  let foundConnectablePair: [Coord, Coord] | null = null
+  const testBoard = current.map(r => [...r])
+
+  outerLoop:
+  for (let i = 0; i < remainingPositions.length; i++) {
+    const pA = remainingPositions[i]
+    for (let j = i + 1; j < remainingPositions.length; j++) {
+      const pB = remainingPositions[j]
+      const origA = testBoard[pA.row][pA.col]
+      const origB = testBoard[pB.row][pB.col]
+      testBoard[pA.row][pA.col] = -9999
+      testBoard[pB.row][pB.col] = -9999
+
+      const path = findLinkPath(testBoard, pA, pB, rows, cols)
+      testBoard[pA.row][pA.col] = origA
+      testBoard[pB.row][pB.col] = origB
+
+      if (path) {
+        foundConnectablePair = [pA, pB]
+        break outerLoop
+      }
+    }
+  }
+
+  if (foundConnectablePair) {
+    const [pA, pB] = foundConnectablePair
+    const otherVals: number[] = []
+    let removedCount = 0
+    for (const v of allVals) {
+      if (v === targetVal && removedCount < 2) {
+        removedCount++
+      } else {
+        otherVals.push(v)
+      }
+    }
+
+    current[pA.row][pA.col] = targetVal
+    current[pB.row][pB.col] = targetVal
+
+    let otherIdx = 0
+    for (const p of remainingPositions) {
+      if ((p.row === pA.row && p.col === pA.col) || (p.row === pB.row && p.col === pB.col)) {
+        continue
+      }
+      current[p.row][p.col] = otherVals[otherIdx++]
+    }
+
+    if (findAnyPair(current, rows, cols)) {
+      return current
+    }
+  }
+
+  // 5. Dự phòng khẩn cấp: Đặt 2 quân giống nhau cạnh nhau ở 2 ô còn lại đầu tiên
+  if (remainingPositions.length >= 2) {
+    const p1 = remainingPositions[0]
+    const p2 = remainingPositions[1]
+    current[p1.row][p1.col] = targetVal
+    current[p2.row][p2.col] = targetVal
+  }
+
+  return current
+}
+
 function createLocalBoard(sizeKey: GridSizeKey): Cell[][] {
   const { cols, rows } = GRID_DIMS[sizeKey]
   const totalCells = cols * rows
@@ -227,17 +364,17 @@ function createLocalBoard(sizeKey: GridSizeKey): Cell[][] {
   for (let r = 0; r < rows; r++) {
     board.push(flat.slice(r * cols, (r + 1) * cols))
   }
-  return board
+  return ensureSolvableBoard(board, rows, cols)
 }
 
 /* ──────────────────────────────────────────────
    Sub-Component: Interactive Board
    ────────────────────────────────────────────── */
-function BoardView({
+const BoardView = React.memo(function BoardView({
   board, cols, rows, selected, onSelect, linkPath, hintPair, matchingPair = null, isRival = false, spriteTheme = 'artwork',
   tileStyle = 'tile-classic', lineEffect = 'line-laser',
   isScrambling = false, shockwaves = [], matchParticles = [], floatingPopups = [],
-  activeSkillZaps = []
+  activeSkillZaps = [], wildcardCoords = []
 }: {
   board: Cell[][]
   cols: number
@@ -256,6 +393,7 @@ function BoardView({
   matchParticles?: Array<{ id: string; x: number; y: number; color: string; tx: number; ty: number }>
   floatingPopups?: Array<{ id: string; x: number; y: number; text: string; color: string }>
   activeSkillZaps?: ElementalZap[]
+  wildcardCoords?: string[]
 }) {
   // SVG laser line mapping: nối chính xác từ tâm ô vuông (col + 0.5) / cols
   const svgCoords = useMemo(() => {
@@ -292,9 +430,11 @@ function BoardView({
               )
               const isEmptyCell = cell === null
               const activeZap = !isEmptyCell ? (activeSkillZaps || []).find(z => z.row === r && z.col === c) : null
+              const isWildcard = !isEmptyCell && (wildcardCoords || []).includes(`${r}-${c}`)
 
               return (
                 <div
+                  id={isRival ? `rival-tile-${r}-${c}` : `board-tile-${r}-${c}`}
                   key={`${r}-${c}`}
                   className={[
                     'pika-tile',
@@ -302,6 +442,7 @@ function BoardView({
                     isSelected ? 'selected' : '',
                     isHint ? 'hinted' : '',
                     isMatching ? 'tile-matching' : '',
+                    isWildcard ? 'tile-is-wildcard' : '',
                     activeZap ? `elemental-zap elemental-zap-${activeZap.element}` : '',
                   ].filter(Boolean).join(' ')}
                   onClick={() => !isRival && !isMatching && onSelect && onSelect({ row: r, col: c })}
@@ -315,7 +456,12 @@ function BoardView({
                       loading="eager"
                     />
                   )}
-                  {activeZap && (
+                  {isWildcard && (
+                    <div className="zap-element-badge" style={{ background: '#facc15', color: '#713f12', boxShadow: '0 0 8px #facc15', fontWeight: 900 }}>
+                      ⚡ JOKER
+                    </div>
+                  )}
+                  {activeZap && !isWildcard && (
                     <div className="zap-element-badge">
                       {activeZap.badge}
                     </div>
@@ -379,7 +525,7 @@ function BoardView({
       </div>
     </div>
   )
-}
+})
 
 /* ──────────────────────────────────────────────
    Sub-Component: Admin User Row Item
@@ -532,6 +678,7 @@ export function MirrorRushGame() {
   const [spriteTheme, setSpriteTheme] = useState<SpriteTheme>('artwork')
   const [soundEnabled, setSoundEnabled] = useState(true)
   const [bgmEnabled, setBgmEnabled] = useState(true)
+  const [audioReady, setAudioReady] = useState(false)
 
   const toggleBgm = useCallback(() => {
     if (bgmEnabled) {
@@ -539,16 +686,24 @@ export function MirrorRushGame() {
       setBgmEnabled(false)
     } else {
       setBgmEnabled(true)
+      autoUnlockAudio()
       startBgm()
     }
   }, [bgmEnabled])
 
-  // Stop BGM on unmount
+  // Auto-start BGM right on load + subscribe to unlock state
   useEffect(() => {
+    const unsub = subscribeAudioReady((ready) => {
+      setAudioReady(ready)
+    })
+    if (bgmEnabled) {
+      startBgm()
+    }
     return () => {
+      unsub()
       stopBgm()
     }
-  }, [])
+  }, [bgmEnabled])
 
   // Player & Account State
   const [user, setUser] = useState<UserAccount | null>(null)
@@ -580,14 +735,14 @@ export function MirrorRushGame() {
   const emotionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const rivalEmotionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // Rival Character based on Bot Level or PVP Mode
+  // Rival Character based on Bot Level or PVP Mode (3 Characters: Satoshi, Madara, Himeko)
   const rivalCharacterId = useMemo(() => {
     if (playMode === 'pvp-bot') {
-      const roster = ['paladin', 'ninja', 'mage', 'ranger', 'cyber', 'frost', 'kasumi', 'satoshi']
+      const roster = ['madara', 'himeko', 'satoshi']
       return roster[(botLevel - 1) % roster.length]
     }
-    return 'kasumi'
-  }, [playMode, botLevel])
+    return selectedCharacterId === 'satoshi' ? 'madara' : 'satoshi'
+  }, [playMode, botLevel, selectedCharacterId])
 
   // Helpers to trigger emotion with auto-reset to idle
   const triggerPlayerEmotion = useCallback((emotion: CharacterEmotion, duration = 1400) => {
@@ -636,7 +791,15 @@ export function MirrorRushGame() {
   const [currentGuestWins, setCurrentGuestWins] = useState(0)
   const [timeLeft, setTimeLeft] = useState(DEFAULT_TIME)
   const [combo, setCombo] = useState(0)
+  const [comboExpiresAt, setComboExpiresAt] = useState<number>(0)
+  const [comboSecondsLeft, setComboSecondsLeft] = useState<number>(0)
   const [energy, setEnergy] = useState(0) // 0-100% skill energy
+
+  // Special Character Ultimate States
+  const [thunderRadarUntil, setThunderRadarUntil] = useState<number>(0)
+  const [solarOverdriveUntil, setSolarOverdriveUntil] = useState<number>(0)
+  const [wildcardCoords, setWildcardCoords] = useState<string[]>([])
+  const [activeLaserCross, setActiveLaserCross] = useState<{ row: number; col: number } | null>(null)
 
   // Debuff states
   const [frozenUntil, setFrozenUntil] = useState(0)
@@ -648,8 +811,14 @@ export function MirrorRushGame() {
   const [matchParticles, setMatchParticles] = useState<Array<{ id: string; x: number; y: number; color: string; tx: number; ty: number }>>([])
   const [floatingPopups, setFloatingPopups] = useState<Array<{ id: string; x: number; y: number; text: string; color: string }>>([])
   const [activeSkillZaps, setActiveSkillZaps] = useState<ElementalZap[]>([])
+  const [avatarBeams, setAvatarBeams] = useState<AvatarSkillBeam[]>([])
+  const [useVideoAvatar, setUseVideoAvatar] = useState<boolean>(true)
+  const [activeLobbyScreen, setActiveLobbyScreen] = useState<'menu' | 'character-select' | 'ranked'>('menu')
+  const [previewCharId, setPreviewCharId] = useState<string>('satoshi')
+  const [previewEmotion, setPreviewEmotion] = useState<CharacterEmotion>('idle')
   const [matchingPair, setMatchingPair] = useState<[Coord, Coord] | null>(null)
   const isMatchingRef = useRef<boolean>(false)
+  const isAutoSwappingRef = useRef<boolean>(false)
 
   // Admin Management State
   const [showAdminModal, setShowAdminModal] = useState(false)
@@ -724,6 +893,22 @@ export function MirrorRushGame() {
   const botTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const syncTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
+  // Combo countdown timer (tự động hết hạn sau 4.5s không ăn bài)
+  useEffect(() => {
+    if (combo <= 0 || gameOver) return
+    const interval = setInterval(() => {
+      const current = Date.now()
+      const diff = comboExpiresAt - current
+      if (diff <= 0) {
+        setCombo(0)
+        setComboSecondsLeft(0)
+      } else {
+        setComboSecondsLeft(Math.max(0, parseFloat((diff / 1000).toFixed(1))))
+      }
+    }, 100)
+    return () => clearInterval(interval)
+  }, [combo, comboExpiresAt, gameOver])
+
   const dims = GRID_DIMS[gridSize] || GRID_DIMS['14x8']
   const now = Date.now()
   const isImmune = immunityUntil > now
@@ -732,6 +917,11 @@ export function MirrorRushGame() {
   const isRivalFrozen = rivalFrozenUntil > now
   const isRivalFogged = rivalFogUntil > now
   const userRank = useMemo(() => getRankTier(rankPoints), [rankPoints])
+
+  const activeRadarPair = useMemo(() => {
+    if (thunderRadarUntil <= Date.now() || gameOver) return null
+    return findAnyPair(board, dims.rows, dims.cols)
+  }, [thunderRadarUntil, board, dims.rows, dims.cols, gameOver])
 
   // Reaction sync on gameOver
   useEffect(() => {
@@ -837,7 +1027,10 @@ export function MirrorRushGame() {
     setCoins(u.coins)
     setMaxUnlockedBotLevel(u.botLevelProgress || 1)
     if (u.rankPoints !== undefined) setRankPoints(u.rankPoints)
-    if (u.characterId) setSelectedCharacterId(u.characterId)
+    if (u.characterId) {
+      const validChar = ['satoshi', 'madara', 'maldara', 'himeko'].includes(u.characterId) ? u.characterId : 'satoshi'
+      setSelectedCharacterId(validChar)
+    }
     if (u.equipped) setEquipped(u.equipped)
     if (u.unlockedItems) setUnlockedItems(u.unlockedItems)
     if (typeof window !== 'undefined') {
@@ -1348,6 +1541,15 @@ export function MirrorRushGame() {
                 setGameOver(won ? 'win' : 'lose')
                 playSound(won ? 'win' : 'lose', soundEnabled)
                 if (won) handleGameWin()
+              } else {
+                const nextPair = findAnyPair(next, dims.rows, dims.cols)
+                if (!nextPair) {
+                  setNotice('🔄 PHÁT HIỆN BẾ TẮC (HẾT CẶP KHẢ DỤNG) · TỰ ĐỘNG ĐỔI BÀI!')
+                  playSound('shuffle', soundEnabled)
+                  setIsScrambling(true)
+                  setTimeout(() => setIsScrambling(false), 450)
+                  return ensureSolvableBoard(next, dims.rows, dims.cols)
+                }
               }
               return next
             }
@@ -1357,7 +1559,12 @@ export function MirrorRushGame() {
           // Bot matches on its own separate board
           setRivalBoard(cur => {
             if (cur.length === 0) return cur
-            const pair = findAnyPair(cur, dims.rows, dims.cols)
+            let pair = findAnyPair(cur, dims.rows, dims.cols)
+            if (!pair) {
+              const solved = ensureSolvableBoard(cur, dims.rows, dims.cols)
+              pair = findAnyPair(solved, dims.rows, dims.cols)
+              cur = solved
+            }
             if (pair) {
               const path = findLinkPath(cur, pair[0], pair[1], dims.rows, dims.cols)
               if (path) {
@@ -1375,6 +1582,11 @@ export function MirrorRushGame() {
               if (remaining === 0) {
                 setGameOver('lose')
                 playSound('lose', soundEnabled)
+              } else {
+                const nextPair = findAnyPair(next, dims.rows, dims.cols)
+                if (!nextPair) {
+                  return ensureSolvableBoard(next, dims.rows, dims.cols)
+                }
               }
               return next
             }
@@ -1391,27 +1603,107 @@ export function MirrorRushGame() {
     }
   }, [inGame, playMode, gameOver, rivalBoard.length, isRivalFrozen, isRivalFogged, boardMode, dims.rows, dims.cols, score, rivalScore, soundEnabled])
 
-  // Online multiplayer sync — Adaptive polling with since-param optimization
+  // Online multiplayer sync — Ultra-low latency polling (200ms) with since-param optimization
   const lastSyncUpdatedAtRef = useRef<number>(0)
+
+  const applyRoomData = useCallback((room: RoomState) => {
+    if (!room) return
+    lastSyncUpdatedAtRef.current = room.updatedAt
+    const amHost = room.host.id === playerId
+    if (isHost !== amHost) {
+      setIsHost(amHost)
+    }
+    const me = amHost ? room.host : room.guest
+    const opp = amHost ? room.guest : room.host
+
+    if (room.mode === 'shared' && room.sharedBoard) {
+      setBoard(room.sharedBoard)
+    } else if (me && me.board && me.board.length > 0) {
+      setBoard(cur => {
+        if (!cur || cur.length === 0) return me.board
+        // Never resurrect a cell that was already matched locally
+        return me.board.map((row, r) =>
+          row.map((cell, c) => (cur[r]?.[c] === null ? null : cell))
+        )
+      })
+    }
+
+    if (me) {
+      setScore(prev => Math.max(prev, me.score))
+      setEnergy(prev => Math.max(prev, me.energy))
+      setFrozenUntil(me.frozenUntil)
+      setFogUntil(me.fogUntil)
+    }
+
+    if (opp) {
+      setRivalName(opp.name)
+      setRivalScore(opp.score)
+      if (opp.board && opp.board.length > 0) {
+        setRivalBoard(room.mode === 'shared' && room.sharedBoard ? room.sharedBoard : opp.board)
+      }
+      setRivalFrozenUntil(opp.frozenUntil)
+      setRivalFogUntil(opp.fogUntil)
+    }
+
+    if (room.lastAction?.message) {
+      setNotice(room.lastAction.message)
+    }
+
+    if (room.status === 'finished') {
+      setGameOver(prev => {
+        if (!prev) {
+          if (room.winnerId === playerId) {
+            playSound('win', soundEnabled)
+            handleGameWin()
+            return 'win'
+          } else {
+            playSound('lose', soundEnabled)
+            return 'lose'
+          }
+        }
+        return prev
+      })
+    }
+  }, [playerId, isHost, soundEnabled, handleGameWin])
+
+  const sendRoomAction = useCallback((action: any) => {
+    if (playMode !== 'pvp-online' || !roomCode) return
+    fetch(`/api/rooms/${roomCode}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ playerId, action }),
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (data.success && data.room) {
+          applyRoomData(data.room)
+        }
+      })
+      .catch(() => {})
+  }, [playMode, roomCode, playerId, applyRoomData])
+
   useEffect(() => {
     if (!inGame || playMode !== 'pvp-online' || !roomCode) return
 
-    let currentInterval = 800 // Start at 800ms
+    let currentInterval = 140 // 140ms ultra-fast competitive PvP sync
     let idleCount = 0
-    const FAST_INTERVAL = 800
-    const SLOW_INTERVAL = 1200
+    const FAST_INTERVAL = 140
+    const SLOW_INTERVAL = 380
 
     const syncRoom = async () => {
       try {
         const sinceParam = lastSyncUpdatedAtRef.current > 0 ? `?since=${lastSyncUpdatedAtRef.current}` : ''
-        const res = await fetch(`/api/rooms/${roomCode}${sinceParam}`)
+        const res = await fetch(`/api/rooms/${roomCode}${sinceParam}`, {
+          cache: 'no-store',
+          headers: { 'Cache-Control': 'no-cache' },
+        })
         const data = await res.json()
 
         // No changes since last sync — skip all state updates
         if (data.success && data.changed === false) {
           idleCount++
-          // If idle for 3+ consecutive polls, slow down
-          if (idleCount >= 3 && currentInterval < SLOW_INTERVAL) {
+          // If idle for 6+ consecutive polls, back off slightly to 500ms
+          if (idleCount >= 6 && currentInterval < SLOW_INTERVAL) {
             currentInterval = SLOW_INTERVAL
             if (syncTimerRef.current) clearInterval(syncTimerRef.current)
             syncTimerRef.current = setInterval(syncRoom, currentInterval)
@@ -1428,63 +1720,7 @@ export function MirrorRushGame() {
             syncTimerRef.current = setInterval(syncRoom, currentInterval)
           }
 
-          const room: RoomState = data.room
-          lastSyncUpdatedAtRef.current = room.updatedAt
-          const amHost = room.host.id === playerId
-          if (isHost !== amHost) {
-            setIsHost(amHost)
-          }
-          const me = amHost ? room.host : room.guest
-          const opp = amHost ? room.guest : room.host
-
-          if (room.mode === 'shared' && room.sharedBoard) {
-            setBoard(room.sharedBoard)
-          } else if (me && me.board && me.board.length > 0) {
-            setBoard(cur => {
-              if (!cur || cur.length === 0) return me.board
-              // Never resurrect a cell that was already matched locally
-              return me.board.map((row, r) =>
-                row.map((cell, c) => (cur[r]?.[c] === null ? null : cell))
-              )
-            })
-          }
-
-          if (me) {
-            setScore(prev => Math.max(prev, me.score))
-            setEnergy(prev => Math.max(prev, me.energy))
-            setFrozenUntil(me.frozenUntil)
-            setFogUntil(me.fogUntil)
-          }
-
-          if (opp) {
-            setRivalName(opp.name)
-            setRivalScore(opp.score)
-            if (opp.board && opp.board.length > 0) {
-              setRivalBoard(room.mode === 'shared' && room.sharedBoard ? room.sharedBoard : opp.board)
-            }
-            setRivalFrozenUntil(opp.frozenUntil)
-            setRivalFogUntil(opp.fogUntil)
-          }
-
-          if (room.lastAction?.message) {
-            setNotice(room.lastAction.message)
-          }
-
-          if (room.status === 'finished') {
-            setGameOver(prev => {
-              if (!prev) {
-                if (room.winnerId === playerId) {
-                  playSound('win', soundEnabled)
-                  handleGameWin()
-                  return 'win'
-                } else {
-                  playSound('lose', soundEnabled)
-                  return 'lose'
-                }
-              }
-              return prev
-            })
-          }
+          applyRoomData(data.room)
         }
       } catch {
         // ignore
@@ -1498,7 +1734,7 @@ export function MirrorRushGame() {
       if (syncTimerRef.current) clearInterval(syncTimerRef.current)
       lastSyncUpdatedAtRef.current = 0
     }
-  }, [inGame, playMode, roomCode, isHost, playerId, soundEnabled])
+  }, [inGame, playMode, roomCode, applyRoomData])
 
   /* ─── Online Room Management ─── */
   const handleCreateRoom = async () => {
@@ -1606,6 +1842,36 @@ export function MirrorRushGame() {
     }
   }
 
+  // TỰ ĐỘNG PHÁT HIỆN THẾ CỜ BẾ TẮC (DEADLOCK) & TỰ ĐỘNG ĐỔI BÀI (AUTO-SWAP)
+  useEffect(() => {
+    if (!inGame || gameOver || board.length === 0 || isAutoSwappingRef.current) return
+
+    const remaining = board.flat().filter(c => c !== null).length
+    if (remaining <= 1) return
+
+    const validPair = findAnyPair(board, dims.rows, dims.cols)
+    if (!validPair) {
+      isAutoSwappingRef.current = true
+      setIsScrambling(true)
+      playSound('shuffle', soundEnabled)
+      setNotice('🔄 PHÁT HIỆN BẾ TẮC (HẾT CẶP KHẢ DỤNG) · TỰ ĐỘNG ĐỔI BÀI!')
+      setSelected(null)
+      setHintPair(null)
+
+      setTimeout(() => {
+        setBoard(cur => {
+          const solvable = ensureSolvableBoard(cur, dims.rows, dims.cols)
+          if (playMode === 'pvp-online' && roomCode) {
+            sendRoomAction({ type: 'shuffle', newBoard: solvable })
+          }
+          return solvable
+        })
+        setIsScrambling(false)
+        isAutoSwappingRef.current = false
+      }, 450)
+    }
+  }, [board, inGame, gameOver, dims.rows, dims.cols, playMode, roomCode, soundEnabled, sendRoomAction])
+
   /* ─── Match Actions ─── */
   const onTileSelect = (coord: Coord) => {
     if (gameOver || isMeFrozen || isMatchingRef.current) return
@@ -1625,22 +1891,28 @@ export function MirrorRushGame() {
       return
     }
 
-    // If clicking a DIFFERENT Pokemon icon: simply change selection without breaking combo!
+    // Check if either tile is a Wildcard Joker or identical Pokemon
     const selectedCell = board[selected.row]?.[selected.col]
-    if (selectedCell !== cell) {
+    const isPrevWildcard = wildcardCoords.includes(`${selected.row}-${selected.col}`)
+    const isCurWildcard = wildcardCoords.includes(`${coord.row}-${coord.col}`)
+    const isMatchEligible = (selectedCell === cell) || isPrevWildcard || isCurWildcard
+
+    if (!isMatchEligible) {
       setSelected(coord)
       playSound('select', soundEnabled)
       return
     }
 
-    // Both tiles have the SAME Pokemon: check for valid Pikachu link path (max 2 turns)
+    // Both tiles can link: check for valid Pikachu link path (max 2 turns)
     const path = findLinkPath(board, selected, coord, dims.rows, dims.cols)
     const prevCoord = selected
     setSelected(null)
 
     if (!path) {
-      // Failed to link identical tiles (blocked by obstacles)
+      // Failed to link (blocked by obstacles)
       setCombo(0)
+      setComboExpiresAt(0)
+      setComboSecondsLeft(0)
       playSound('wrong', soundEnabled)
       setNotice('KHÔNG CÓ ĐƯỜNG NỐI HỢP LỆ (TỐI ĐA 2 KHÚC CUA)')
       return
@@ -1653,11 +1925,16 @@ export function MirrorRushGame() {
     setLinkPath(path)
     playSound('match', soundEnabled)
 
+    const isSolar = solarOverdriveUntil > Date.now()
     const newCombo = combo + 1
     let addedPoints = 10 + (newCombo > 1 ? newCombo * 5 : 0)
     if (doubleScoreTurnsLeft > 0) {
       addedPoints *= 2
       setDoubleScoreTurnsLeft(d => Math.max(0, d - 1))
+    }
+    if (isSolar) {
+      addedPoints *= 3
+      setTimeLeft(t => Math.min(DEFAULT_TIME, t + 2))
     }
 
     // Visual FX: Shockwaves & Particles
@@ -1696,6 +1973,7 @@ export function MirrorRushGame() {
     setTimeout(() => {
       setLinkPath(null)
       setMatchingPair(null)
+      setWildcardCoords(prev => prev.filter(c => c !== `${prevCoord.row}-${prevCoord.col}` && c !== `${coord.row}-${coord.col}`))
 
       // Remove the 2 icons immediately on local board (applies to solo, bot, and pvp-online!)
       setBoard(cur => {
@@ -1711,22 +1989,13 @@ export function MirrorRushGame() {
         } else {
           const pair = findAnyPair(next, dims.rows, dims.cols)
           if (!pair) {
-            setNotice('HẾT CẶP KHẢ DỤNG · TỰ ĐỘNG ĐỔI VỊ TRÍ...')
-            let shuffled = shuffleBoard(next, dims.rows, dims.cols)
-            let tries = 0
-            while (!findAnyPair(shuffled, dims.rows, dims.cols) && tries < 30) {
-              shuffled = shuffleBoard(next, dims.rows, dims.cols)
-              tries++
-            }
+            setNotice('🔄 PHÁT HIỆN BẾ TẮC (HẾT CẶP KHẢ DỤNG) · TỰ ĐỘNG ĐỔI BÀI!')
+            playSound('shuffle', soundEnabled)
+            setIsScrambling(true)
+            setTimeout(() => setIsScrambling(false), 450)
+            const shuffled = ensureSolvableBoard(next, dims.rows, dims.cols)
             if (playMode === 'pvp-online' && roomCode) {
-              fetch(`/api/rooms/${roomCode}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  playerId,
-                  action: { type: 'shuffle', newBoard: shuffled },
-                }),
-              }).catch(() => {})
+              sendRoomAction({ type: 'shuffle', newBoard: shuffled })
             }
             return shuffled
           }
@@ -1747,6 +2016,8 @@ export function MirrorRushGame() {
         return updated
       })
       setCombo(newCombo)
+      setComboExpiresAt(Date.now() + 4500)
+      setComboSecondsLeft(4.5)
       setEnergy(e => Math.min(100, e + 20))
 
       // Character Reactions
@@ -1784,20 +2055,13 @@ export function MirrorRushGame() {
 
       // Send match action to server
       if (playMode === 'pvp-online' && roomCode) {
-        fetch(`/api/rooms/${roomCode}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            playerId,
-            action: {
-              type: 'match',
-              coordA: prevCoord,
-              coordB: coord,
-              points: addedPoints,
-              combo: newCombo,
-            },
-          }),
-        }).catch(() => { })
+        sendRoomAction({
+          type: 'match',
+          coordA: prevCoord,
+          coordB: coord,
+          points: addedPoints,
+          combo: newCombo,
+        })
       }
 
       // Unlock input lock
@@ -1811,6 +2075,17 @@ export function MirrorRushGame() {
     setSelected(null)
     setHintPair(null)
 
+    // Calculate avatar positions for projectile
+    const avatarEl = document.getElementById('player-active-avatar')
+    const avatarRect = avatarEl?.getBoundingClientRect()
+    const startX = avatarRect ? avatarRect.left + avatarRect.width / 2 : window.innerWidth * 0.25
+    const startY = avatarRect ? avatarRect.top + avatarRect.height / 2 : 120
+
+    const rivalEl = document.getElementById('rival-active-avatar')
+    const rivalRect = rivalEl?.getBoundingClientRect()
+    const targetX = rivalRect ? rivalRect.left + rivalRect.width / 2 : window.innerWidth * 0.75
+    const targetY = rivalRect ? rivalRect.top + rivalRect.height / 2 : 120
+
     if (skill === 'freeze' && energy >= 30) {
       setEnergy(e => e - 30)
       playSound('freeze', soundEnabled)
@@ -1818,14 +2093,13 @@ export function MirrorRushGame() {
       triggerPlayerEmotion('happy', 1500)
       triggerRivalEmotion('sad', 2200)
 
+      setAvatarBeams([{ id: `pvp_freeze_${Date.now()}`, startX, startY, targetX, targetY, element: 'frost', badge: '❄️' }])
+      setTimeout(() => setAvatarBeams([]), 550)
+
       if (playMode === 'pvp-bot') {
         setRivalFrozenUntil(Date.now() + 3000)
       } else if (playMode === 'pvp-online' && roomCode) {
-        fetch(`/api/rooms/${roomCode}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ playerId, action: { type: 'freeze' } }),
-        }).catch(() => { })
+        sendRoomAction({ type: 'freeze' })
       }
     } else if (skill === 'scramble' && energy >= 45) {
       setEnergy(e => e - 45)
@@ -1834,14 +2108,13 @@ export function MirrorRushGame() {
       triggerPlayerEmotion('happy', 1500)
       triggerRivalEmotion('sad', 2200)
 
+      setAvatarBeams([{ id: `pvp_scramble_${Date.now()}`, startX, startY, targetX, targetY, element: 'astral', badge: '🌪' }])
+      setTimeout(() => setAvatarBeams([]), 550)
+
       if (playMode === 'pvp-bot') {
         setRivalBoard(b => shuffleBoard(b, dims.rows, dims.cols))
       } else if (playMode === 'pvp-online' && roomCode) {
-        fetch(`/api/rooms/${roomCode}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ playerId, action: { type: 'scramble' } }),
-        }).catch(() => { })
+        sendRoomAction({ type: 'scramble' })
       }
     } else if (skill === 'fog' && energy >= 35) {
       setEnergy(e => e - 35)
@@ -1850,14 +2123,13 @@ export function MirrorRushGame() {
       triggerPlayerEmotion('happy', 1500)
       triggerRivalEmotion('sad', 2200)
 
+      setAvatarBeams([{ id: `pvp_fog_${Date.now()}`, startX, startY, targetX, targetY, element: 'shadow', badge: '🌫' }])
+      setTimeout(() => setAvatarBeams([]), 550)
+
       if (playMode === 'pvp-bot') {
         setRivalFogUntil(Date.now() + 3500)
       } else if (playMode === 'pvp-online' && roomCode) {
-        fetch(`/api/rooms/${roomCode}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ playerId, action: { type: 'fog' } }),
-        }).catch(() => { })
+        sendRoomAction({ type: 'fog' })
       }
     }
   }
@@ -1880,7 +2152,7 @@ export function MirrorRushGame() {
     // Tiêu hao năng lượng
     setEnergy(e => Math.max(0, e - cost))
 
-    // Bật hiệu ứng Cut-in Arcade đặc trưng
+    // Bật hiệu ứng Cut-in Arcade đặc trưng (Banner nổi nhẹ nhàng, không che màn hình)
     setUltimateCutin({ character: curChar, active: true })
     playSound('match', soundEnabled)
     setNotice(`💥 ${curChar.name.toUpperCase()}: "${curChar.ultimate.voiceLine}"!`)
@@ -1891,7 +2163,7 @@ export function MirrorRushGame() {
 
     setTimeout(() => {
       setUltimateCutin(null)
-    }, 1800)
+    }, 1500)
 
     // Hàm bổ trợ kích hoạt hiệu ứng giật tan biến theo nguyên tố trên bảng
     const applyElementalZap = (
@@ -1909,127 +2181,203 @@ export function MirrorRushGame() {
         zaps.push({ id: `zap_${pIdx}_1_${Date.now()}`, row: pair[1].row, col: pair[1].col, element, badge })
       })
       setActiveSkillZaps(zaps)
+
+      // Tính toán tia chùm / sét phóng từ Avatar xuống thẳng các icon mục tiêu
+      const avatarEl = document.getElementById('player-active-avatar')
+      const avatarRect = avatarEl?.getBoundingClientRect()
+      const startX = avatarRect ? avatarRect.left + avatarRect.width / 2 : window.innerWidth * 0.15
+      const startY = avatarRect ? avatarRect.top + avatarRect.height / 2 : 120
+
+      const beams: AvatarSkillBeam[] = []
+      pairs.forEach((pair, pIdx) => {
+        [pair[0], pair[1]].forEach((c, cIdx) => {
+          const tileEl = document.getElementById(`board-tile-${c.row}-${c.col}`)
+          const tileRect = tileEl?.getBoundingClientRect()
+          const targetX = tileRect ? tileRect.left + tileRect.width / 2 : window.innerWidth * 0.5
+          const targetY = tileRect ? tileRect.top + tileRect.height / 2 : window.innerHeight * 0.5
+          beams.push({
+            id: `beam_${pIdx}_${cIdx}_${Date.now()}`,
+            startX,
+            startY,
+            targetX,
+            targetY,
+            element,
+            badge,
+          })
+        })
+      })
+
+      setAvatarBeams(beams)
       setTimeout(() => {
-        setBoard(newBoard)
+        setAvatarBeams([])
+      }, 550)
+
+      setTimeout(() => {
+        const solvable = ensureSolvableBoard(newBoard, dims.rows, dims.cols)
+        setBoard(solvable)
         setScore(s => s + points)
         setActiveSkillZaps([])
         if (playMode === 'pvp-online' && roomCode) {
-          fetch(`/api/rooms/${roomCode}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              playerId,
-              action: {
-                type: 'shuffle',
-                newBoard,
-                points,
-              },
-            }),
-          }).catch(() => { })
+          sendRoomAction({
+            type: 'shuffle',
+            newBoard: solvable,
+            points,
+          })
         }
         if (onComplete) onComplete()
-      }, 450)
+      }, 500)
     }
 
-    // Thực thi hiệu ứng riêng biệt của từng nhân vật trong số 8 nhân vật
+    // Thực thi hiệu ứng độc nhất vô nhị của từng nhân vật (Satoshi, Madara, Himeko)
     switch (curChar.id) {
       case 'satoshi': {
-        // Sấm Sét Điên Cuồng: Giật sét đánh tan 3 cặp + choáng đối thủ 2.5s
+        // ⚡ Radar Hoàng Kim + 4 Ô Sấm Sét Joker (Wildcard) + Tặng 15 Gợi ý & 3 Đổi Bài
         playSound('thunder', soundEnabled)
-        const res = findPairsToClear(board, 3, dims.rows, dims.cols)
-        if (res.cleared > 0) {
-          const pts = res.points * (doubleScoreTurnsLeft > 0 ? 2 : 1)
-          setNotice(`⚡ SẤM SÉT 10 VẠN VÔN! Tia sét giật sạch ${res.cleared} cặp Pokémon (+${pts}đ)!`)
-          applyElementalZap(res.pairs, 'electric', '⚡', res.newBoard, pts)
+        setThunderRadarUntil(Date.now() + 8000)
+        setHintsLeft(h => h + 15)
+        setShufflesLeft(s => s + 3)
+
+        // Chọn 4 ô bất kỳ trên bảng và biến thành Ô Sấm Sét Wildcard (Joker)
+        const nonNullCoords: Coord[] = []
+        for (let r = 0; r < dims.rows; r++) {
+          for (let c = 0; c < dims.cols; c++) {
+            if (board[r][c] !== null) nonNullCoords.push({ row: r, col: c })
+          }
         }
+        const shuffled = [...nonNullCoords].sort(() => Math.random() - 0.5).slice(0, 4)
+        const newWildcards = shuffled.map(c => `${c.row}-${c.col}`)
+        setWildcardCoords(prev => Array.from(new Set([...prev, ...newWildcards])))
+
+        // Tia chớp nối từ avatar đến 4 ô biến đổi
+        const avatarEl = document.getElementById('player-active-avatar')
+        const avatarRect = avatarEl?.getBoundingClientRect()
+        const startX = avatarRect ? avatarRect.left + avatarRect.width / 2 : window.innerWidth * 0.15
+        const startY = avatarRect ? avatarRect.top + avatarRect.height / 2 : 120
+        const beams: AvatarSkillBeam[] = shuffled.map((c, i) => {
+          const tileEl = document.getElementById(`board-tile-${c.row}-${c.col}`)
+          const tileRect = tileEl?.getBoundingClientRect()
+          return {
+            id: `beam_satoshi_${i}_${Date.now()}`,
+            startX,
+            startY,
+            targetX: tileRect ? tileRect.left + tileRect.width / 2 : window.innerWidth * 0.5,
+            targetY: tileRect ? tileRect.top + tileRect.height / 2 : window.innerHeight * 0.5,
+            element: 'electric',
+            badge: '⚡',
+          }
+        })
+        setAvatarBeams(beams)
+        setTimeout(() => setAvatarBeams([]), 650)
+
+        setNotice('⚡ RADAR SẤM SÉT & JOKER HOÀNG KIM! Đã mở Radar chỉ đường 8s, biến 4 ô thành Joker Wildcard (+15 Gợi ý)!')
         if (playMode !== 'solo') {
-          setRivalFrozenUntil(Date.now() + 2500)
+          setRivalFrozenUntil(Date.now() + 3000)
         }
         break
       }
-      case 'kasumi': {
-        // Đại Hồng Thủy: Cuộn xoáy sóng thần quét sạch 2 cặp + thanh lọc debuff + trơn trượt đối thủ 3.5s
-        playSound('water', soundEnabled)
-        setFrozenUntil(0)
-        setFogUntil(0)
-        const res = findPairsToClear(board, 2, dims.rows, dims.cols)
-        if (res.cleared > 0) {
-          const pts = res.points * (doubleScoreTurnsLeft > 0 ? 2 : 1)
-          setNotice(`🌊 ĐẠI HỒNG THỦY! Thủy triều cuốn sạch ${res.cleared} cặp Pokémon & thanh lọc mọi hiệu ứng!`)
-          applyElementalZap(res.pairs, 'water', '🌊', res.newBoard, pts)
-        }
-        if (playMode !== 'solo') {
-          setRivalFogUntil(Date.now() + 3500)
-        }
-        break
-      }
-      case 'paladin': {
-        // Hào Quang Bất Hoại: Cột sáng hoàng kim miễn nhiễm 6s + x2 điểm 5 nước đi tiếp theo
-        playSound('holy', soundEnabled)
-        setImmunityUntil(Date.now() + 6000)
-        setDoubleScoreTurnsLeft(5)
-        setNotice(`🛡️ HÀO QUANG BẤT HOẠI KÍCH HOẠT! Thánh quang che chở 6s & x2 toàn bộ điểm 5 nước nối!`)
-        break
-      }
-      case 'mage': {
-        // Lỗ Đen Thời Không: Hố đen vũ trụ hút sập 4 cặp + tặng 1 gợi ý
-        playSound('astral', soundEnabled)
-        const res = findPairsToClear(board, 4, dims.rows, dims.cols)
-        setHintsLeft(h => h + 1)
-        if (res.cleared > 0) {
-          const pts = res.points * (doubleScoreTurnsLeft > 0 ? 2 : 1)
-          setNotice(`🔮 LỖ ĐEN THỜI KHÔNG! Hút xoáy ${res.cleared} cặp Pokémon (+${pts}đ) & tặng +1 Gợi Ý!`)
-          applyElementalZap(res.pairs, 'astral', '🔮', res.newBoard, pts)
-        }
-        break
-      }
-      case 'ninja': {
-        // Phi Tiêu Hắc Ám: Vô ảnh trảm xé toạc 2 cặp + tung mù đen đối thủ 4.5s
+      case 'madara':
+      case 'maldara': {
+        // ☄️ Ảo Thuật Tsukuyomi + Ngưng Đọng Thời Gian 7s + Trọng Lực Susanoo dồn cờ + Khiên Bất Diệt 15s
         playSound('slash', soundEnabled)
-        const res = findPairsToClear(board, 2, dims.rows, dims.cols)
-        if (res.cleared > 0) {
-          const pts = res.points * (doubleScoreTurnsLeft > 0 ? 2 : 1)
-          setNotice(`🥷 PHI TIÊU HẮC ÁM! Vô ảnh trảm triệt hạ ${res.cleared} cặp cờ & tung khói mù đen đối thủ 4.5s!`)
-          applyElementalZap(res.pairs, 'shadow', '⚔️', res.newBoard, pts)
+        setTimerFrozenUntil(Date.now() + 7000)
+        setImmunityUntil(Date.now() + 15000)
+
+        // Dồn cờ xuống đáy (Gravity Fall)
+        const newBoard = board.map(row => [...row])
+        for (let c = 0; c < dims.cols; c++) {
+          const colCells: Cell[] = []
+          for (let r = 0; r < dims.rows; r++) {
+            if (newBoard[r][c] !== null) colCells.push(newBoard[r][c])
+          }
+          const startR = dims.rows - colCells.length
+          for (let r = 0; r < dims.rows; r++) {
+            if (r < startR) newBoard[r][c] = null
+            else newBoard[r][c] = colCells[r - startR]
+          }
         }
+        const solvableBoard = ensureSolvableBoard(newBoard, dims.rows, dims.cols)
+        setBoard(solvableBoard)
+        if (playMode === 'pvp-online' && roomCode) {
+          sendRoomAction({ type: 'shuffle', newBoard: solvableBoard })
+        }
+
+        // Tạo hiệu ứng sóng chấn Susanoo
+        const swId = `sw_susanoo_${Date.now()}`
+        setShockwaves(prev => [...prev, { id: swId, x: 50, y: 50 }])
+
+        setNotice('☄️ ẢO THUẬT TSUKUYOMI & SUSANOO! Ngưng đọng thời gian 7s, Trọng lực dồn toàn bộ cờ xuống đáy & Bật Khiên Susanoo 15s!')
         if (playMode !== 'solo') {
+          setRivalFrozenUntil(Date.now() + 4000) // Đóng băng bảng đối thủ 4s!
           setRivalFogUntil(Date.now() + 4500)
         }
         break
       }
-      case 'ranger': {
-        // Mưa Tên Thần Tốc: Mưa tên tinh linh cắm phá 1 cặp + hồi +2 Lượt Đổi & +1 Gợi Ý
-        playSound('arrow', soundEnabled)
-        const res = findPairsToClear(board, 1, dims.rows, dims.cols)
-        setShufflesLeft(s => s + 2)
-        setHintsLeft(h => h + 1)
+      case 'himeko': {
+        // 🔥 Laser Quỹ Đạo Chữ Thập + Solar Overdrive 10s (x3 Điểm & Hồi +2s mỗi nước nối)
+        playSound('astral', soundEnabled)
+        setSolarOverdriveUntil(Date.now() + 10000)
+
+        // Quét chữ thập: Hàng giữa & Cột giữa
+        const midR = Math.floor(dims.rows / 2)
+        const midC = Math.floor(dims.cols / 2)
+        setActiveLaserCross({ row: midR, col: midC })
+        setTimeout(() => setActiveLaserCross(null), 700)
+
+        // Xóa hoàn chỉnh các cặp (đảm bảo tính chẵn lẻ, không bao giờ tạo quân mồ côi!)
+        const res = findPairsToClear(board, 3, dims.rows, dims.cols)
+        let clearedBoard = res.newBoard
+        let pts = res.points || 60
+
+        if (res.cleared === 0) {
+          const valMap = new Map<number, Coord[]>()
+          for (let r = 0; r < dims.rows; r++) {
+            for (let c = 0; c < dims.cols; c++) {
+              const v = board[r][c]
+              if (v !== null) {
+                if (!valMap.has(v)) valMap.set(v, [])
+                valMap.get(v)!.push({ row: r, col: c })
+              }
+            }
+          }
+          for (const coords of valMap.values()) {
+            if (coords.length >= 2) {
+              clearedBoard = board.map(r => [...r])
+              clearedBoard[coords[0].row][coords[0].col] = null
+              clearedBoard[coords[1].row][coords[1].col] = null
+              pts = 30
+              break
+            }
+          }
+        }
+
+        const solvableBoard = ensureSolvableBoard(clearedBoard, dims.rows, dims.cols)
+        setScore(s => s + pts)
+        setBoard(solvableBoard)
+        if (playMode === 'pvp-online' && roomCode) {
+          sendRoomAction({ type: 'shuffle', newBoard: solvableBoard, points: pts })
+        }
+
+        // Shockwaves dọc theo chữ thập
+        setShockwaves(prev => [
+          ...prev,
+          { id: `sw_himeko_h_${Date.now()}`, x: 50, y: ((midR + 0.5) / dims.rows) * 100 },
+          { id: `sw_himeko_v_${Date.now()}`, x: ((midC + 0.5) / dims.cols) * 100, y: 50 },
+        ])
+
+        setNotice(`🔥 BÃO LỬA THIÊN THỂ! Laser quét sạch các cặp trên chữ thập (+${pts}đ) & kích hoạt Solar Overdrive x3 Điểm 10s!`)
+        break
+      }
+      default: {
+        playSound('match', soundEnabled)
+        const res = findPairsToClear(board, 2, dims.rows, dims.cols)
         if (res.cleared > 0) {
-          const pts = res.points * (doubleScoreTurnsLeft > 0 ? 2 : 1)
-          setNotice(`🏹 MƯA TÊN THẦN TỐC! Bắn tan 1 cặp Pokémon, hồi phục +2 Lượt Đổi & +1 Gợi Ý!`)
-          applyElementalZap(res.pairs, 'arrow', '🏹', res.newBoard, pts)
+          const pts = res.points
+          applyElementalZap(res.pairs, 'electric', '⚡', res.newBoard, pts)
         }
-        break
-      }
-      case 'cyber': {
-        // Nhát Chém Quá Tải: Glitch số hóa +15s thời gian + nhân 3 combo hiện tại
-        playSound('cyber', soundEnabled)
-        setTimeLeft(t => t + 15)
-        setCombo(c => Math.max(2, c * 3))
-        setNotice(`⚡ NHÁT CHÉM QUÁ TẢI! Hack +15s thời gian thi đấu và nhân 3 chuỗi Combo!`)
-        break
-      }
-      case 'frost': {
-        // Bão Tuyết Đóng Băng: Đóng băng đối thủ 4.5s + đóng băng đồng hồ ván đấu 6s
-        playSound('freeze', soundEnabled)
-        setTimerFrozenUntil(Date.now() + 6000)
-        if (playMode !== 'solo') {
-          setRivalFrozenUntil(Date.now() + 4500)
-        }
-        setNotice(`❄️ BÃO TUYẾT ĐỐNG BĂNG! Đóng băng đối thủ 4.5s & đóng băng đồng hồ ván đấu 6 giây!`)
         break
       }
     }
-  }, [gameOver, selectedCharacterId, energy, soundEnabled, playMode, board, dims.rows, dims.cols, doubleScoreTurnsLeft, triggerPlayerEmotion, triggerRivalEmotion, roomCode, playerId])
+  }, [gameOver, selectedCharacterId, energy, soundEnabled, playMode, board, dims.rows, dims.cols, doubleScoreTurnsLeft, triggerPlayerEmotion, triggerRivalEmotion, roomCode, playerId, sendRoomAction])
 
   /* ─── Matchmaking Queue Operations ─── */
   const cancelMatchmakingQueue = useCallback(async () => {
@@ -2088,8 +2436,9 @@ export function MirrorRushGame() {
       })
 
       playSound('match', soundEnabled)
+      if (bgmEnabled) startBgm()
 
-      // Show VS faceoff for 2.2 seconds, then launch match
+      // Show punchy VS faceoff for 900ms, then immediately launch match
       setTimeout(() => {
         setIsMatchmaking(false)
         setFoundMatch(null)
@@ -2151,7 +2500,7 @@ export function MirrorRushGame() {
           playSound('match', soundEnabled)
           if (bgmEnabled) startBgm()
         }
-      }, 2200)
+      }, 900)
     }
 
     try {
@@ -2201,47 +2550,39 @@ export function MirrorRushGame() {
     setIsScrambling(true)
     setTimeout(() => setIsScrambling(false), 550)
 
-    let next = shuffleBoard(board, dims.rows, dims.cols)
-    let tries = 0
-    while (!findAnyPair(next, dims.rows, dims.cols) && tries < 40) {
-      next = shuffleBoard(board, dims.rows, dims.cols)
-      tries++
-    }
+    const next = ensureSolvableBoard(board, dims.rows, dims.cols)
     setBoard(next)
     setSelected(null)
     setHintPair(null)
     setNotice(`ĐÃ ĐỔI VỊ TRÍ! CÒN ${shufflesLeft - 1} LƯỢT.`)
 
     if (playMode === 'pvp-online' && roomCode) {
-      fetch(`/api/rooms/${roomCode}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ playerId, action: { type: 'shuffle', newBoard: next } }),
-      }).catch(() => { })
+      sendRoomAction({ type: 'shuffle', newBoard: next })
     }
   }
 
   const onHintClick = () => {
     if (hintsLeft <= 0 || gameOver) return
-    const pair = findAnyPair(board, dims.rows, dims.cols)
+    let pair = findAnyPair(board, dims.rows, dims.cols)
+    if (!pair) {
+      const next = ensureSolvableBoard(board, dims.rows, dims.cols)
+      setBoard(next)
+      pair = findAnyPair(next, dims.rows, dims.cols)
+    }
     if (pair) {
       playSound('hint', soundEnabled)
       setHintsLeft(h => h - 1)
       setHintPair(pair)
-      setNotice(`GỢI Ý ĐÃ SÁNG! CÒN ${hintsLeft - 1} LẦN.`)
-      setTimeout(() => setHintPair(null), 4000)
+      setNotice(`GỢI Ý: CẶP [${pair[0].row + 1},${pair[0].col + 1}] & [${pair[1].row + 1},${pair[1].col + 1}]! CÒN ${hintsLeft - 1} LƯỢT.`)
     } else {
-      setNotice('KHÔNG CÒN CẶP HỢP LỆ ĐỂ GỢI Ý!')
+      playSound('wrong', soundEnabled)
+      setNotice('KHÔNG CÒN CẶP NỐI KHẢ DỤNG!')
     }
   }
 
   const onRestart = () => {
     if (playMode === 'pvp-online' && roomCode) {
-      fetch(`/api/rooms/${roomCode}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ playerId, action: { type: 'restart' } }),
-      }).catch(() => { })
+      sendRoomAction({ type: 'restart' })
     } else {
       startMatch(gridSize)
     }
@@ -3083,15 +3424,16 @@ export function MirrorRushGame() {
         </div>
       )}
 
-      {/* 💥 Hiệu Ứng Cut-in Arcade Chiêu Thức Cuối (Ultimate Skill) */}
+      {/* 💥 Hiệu Ứng Cut-in Arcade Chiêu Thức Cuối (Floating Banner - Không Che Bàn Cờ) */}
       {ultimateCutin && ultimateCutin.active && (
-        <div className="ultimate-cutin-overlay" style={{ background: ultimateCutin.character.ultimate.bannerColor }}>
-          <div className="ultimate-cutin-content">
+        <div className="ultimate-cutin-overlay">
+          <div className="ultimate-cutin-content" style={{ background: ultimateCutin.character.ultimate.bannerColor }}>
             <div className="ultimate-cutin-character">
               <CharacterAvatar
                 characterId={ultimateCutin.character.id}
                 emotion="combo"
-                size="lg"
+                size="md"
+                useVideo={useVideoAvatar}
                 interactive={false}
               />
             </div>
@@ -3110,6 +3452,9 @@ export function MirrorRushGame() {
           </div>
         </div>
       )}
+
+      {/* ⚡ Avatar-to-Icon Projectile & Lightning Beams Overlay */}
+      <AvatarSkillBeams beams={avatarBeams} />
 
       {/* 📡 Modal Tìm Trận Nhanh (Ranked Matchmaking Radar) */}
       {isMatchmaking && (
@@ -3209,9 +3554,557 @@ export function MirrorRushGame() {
   )
 
   /* ══════════════════════════════════════════════
+     SCREEN 2: DEDICATED CHARACTER SELECTION PAGE (TRANG CHỌN TƯỚNG RIÊNG)
+     ══════════════════════════════════════════════ */
+  const renderCharacterSelectPage = () => {
+    const previewChar = getCharacterById(previewCharId)
+    const isEquipped = selectedCharacterId === previewChar.id
+    const isLocked = !user && previewChar.id !== 'satoshi'
+
+    return (
+      <main className="char-select-page-wrapper">
+        {/* Top bar */}
+        <div className="char-select-top-bar">
+          <button
+            className="btn-back-menu"
+            onClick={() => {
+              playSound('select', soundEnabled)
+              setActiveLobbyScreen('menu')
+            }}
+          >
+            <ArrowLeft size={16} /> Quay Lại Sảnh
+          </button>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ fontSize: '20px' }}>👾</span>
+            <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 900, color: '#facc15', letterSpacing: '0.04em' }}>
+              CHỌN NHÂN VẬT & TUYỆT KỸ
+            </h2>
+          </div>
+
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <button
+              className={`btn-bgm-toggle ${!useVideoAvatar ? 'muted' : ''}`}
+              onClick={() => setUseVideoAvatar(!useVideoAvatar)}
+              title="Bật / Tắt Avatar Video Nhân Vật Động"
+            >
+              <span>Avatar: <strong>{useVideoAvatar ? 'VIDEO 🎬' : 'PIXEL 👾'}</strong></span>
+            </button>
+            <button
+              className={`btn-bgm-toggle ${!soundEnabled ? 'muted' : ''}`}
+              onClick={() => {
+                setSoundEnabled(!soundEnabled)
+                playSound('select', !soundEnabled)
+              }}
+            >
+              {soundEnabled ? <Volume2 size={14} /> : <VolumeX size={14} />}
+            </button>
+          </div>
+        </div>
+
+        {/* 2-Column Split Screen */}
+        <div className="char-select-content-grid">
+          {/* CỘT TRÁI: CẮT PHÔNG HIỂN THỊ GÓC TRÁI MÀN HÌNH SIÊU TO */}
+          <div className="char-showcase-left-panel">
+            <div className="char-cutout-pedestal">
+              <div
+                className="char-cutout-glow-ring"
+                style={{ background: previewChar.glowColor }}
+              />
+              <CharacterAvatar
+                characterId={previewChar.id}
+                emotion={previewEmotion}
+                size="showcase"
+                cutout={true}
+                useVideo={useVideoAvatar}
+              />
+            </div>
+
+            {/* Phản ứng cảm xúc tương tác */}
+            <div className="char-emotion-triggers">
+              <button
+                className={`char-emotion-btn ${previewEmotion === 'happy' ? 'active' : ''}`}
+                onClick={() => {
+                  setPreviewEmotion('happy')
+                  playSound('match', soundEnabled)
+                }}
+                title="Xem biểu cảm Vui vẻ khi ăn điểm"
+              >
+                💖 Vui / Điểm
+              </button>
+              <button
+                className={`char-emotion-btn ${previewEmotion === 'combo' ? 'active' : ''}`}
+                onClick={() => {
+                  setPreviewEmotion('combo')
+                  playSound('thunder', soundEnabled)
+                }}
+                title="Xem biểu cảm Combo lửa"
+              >
+                🔥 Combo
+              </button>
+              <button
+                className={`char-emotion-btn ${previewEmotion === 'win' ? 'active' : ''}`}
+                onClick={() => {
+                  setPreviewEmotion('win')
+                  playSound('win', soundEnabled)
+                }}
+                title="Xem biểu cảm Ăn mừng chiến thắng"
+              >
+                👑 Thắng
+              </button>
+              <button
+                className={`char-emotion-btn ${previewEmotion === 'sad' ? 'active' : ''}`}
+                onClick={() => {
+                  setPreviewEmotion('sad')
+                  playSound('wrong', soundEnabled)
+                }}
+                title="Xem biểu cảm Buồn bã"
+              >
+                🌧️ Thua
+              </button>
+              <button
+                className={`char-emotion-btn ${previewEmotion === 'idle' ? 'active' : ''}`}
+                onClick={() => setPreviewEmotion('idle')}
+                title="Trạng thái chuẩn bị"
+              >
+                💤 Nghỉ
+              </button>
+            </div>
+
+            {/* Thông tin nhân vật */}
+            <div style={{ textAlign: 'center', marginBottom: '8px' }}>
+              <h2 style={{ margin: 0, fontSize: '24px', fontWeight: 900, color: previewChar.accentColor }}>
+                {previewChar.name}
+              </h2>
+              <div style={{ fontSize: '13px', color: '#cbd5e1', fontWeight: 700, marginTop: '2px' }}>
+                {previewChar.title}
+              </div>
+            </div>
+
+            {/* Khẩu hiệu lồng tiếng */}
+            <div className="char-voice-line-badge">
+              "{previewChar.ultimate.voiceLine}"
+            </div>
+
+            {/* Thẻ Tuyệt Kỹ */}
+            <div
+              className="char-ult-showcase-card"
+              style={{
+                background: `${previewChar.ultimate.bannerColor}18`,
+                borderColor: `${previewChar.ultimate.bannerColor}60`,
+                width: '100%',
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span style={{ fontSize: '20px' }}>{previewChar.ultimate.icon}</span>
+                  <strong style={{ fontSize: '15px', color: '#ffffff' }}>{previewChar.ultimate.name}</strong>
+                </div>
+                <span style={{ fontSize: '12px', fontWeight: 800, color: '#facc15' }}>
+                  Tiêu hao: {previewChar.ultimate.energyCost}% NL
+                </span>
+              </div>
+              <p style={{ margin: 0, fontSize: '12.5px', color: '#e2e8f0', lineHeight: 1.45 }}>
+                {previewChar.ultimate.description}
+              </p>
+            </div>
+
+            {/* Nút Xác Nhận Chọn Tướng */}
+            {isLocked ? (
+              <button
+                className="btn-confirm-character"
+                style={{ background: 'linear-gradient(135deg, #475569 0%, #1e293b 100%)', color: '#cbd5e1', cursor: 'pointer' }}
+                onClick={() => {
+                  setAuthMode('login')
+                  setShowAuthModal(true)
+                }}
+              >
+                <Lock size={16} /> ĐĂNG NHẬP ĐỂ MỞ KHÓA NHÂN VẬT NÀY
+              </button>
+            ) : isEquipped ? (
+              <button
+                className="btn-confirm-character"
+                style={{ background: 'linear-gradient(135deg, #15803d 0%, #22c55e 100%)', color: '#ffffff' }}
+                onClick={() => {
+                  setActiveLobbyScreen('menu')
+                  playSound('select', soundEnabled)
+                }}
+              >
+                <Check size={18} /> ĐANG SỬ DỤNG · QUAY LẠI SẢNH
+              </button>
+            ) : (
+              <button
+                className="btn-confirm-character"
+                onClick={() => {
+                  handleSelectCharacter(previewChar.id)
+                  playSound('win', soundEnabled)
+                  setNotice(`ĐÃ CHỌN NHÂN VẬT: ${previewChar.name.toUpperCase()}!`)
+                  setActiveLobbyScreen('menu')
+                }}
+              >
+                <Check size={18} /> XÁC NHẬN CHỌN {previewChar.name.toUpperCase()}
+              </button>
+            )}
+          </div>
+
+          {/* CỘT PHẢI: DANH SÁCH 3 NHÂN VẬT */}
+          <div className="char-roster-right-panel">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ fontSize: '15px', fontWeight: 900, color: '#f8fafc' }}>
+                DANH SÁCH ANH HÙNG (3 NHÂN VẬT)
+              </div>
+              <div style={{ fontSize: '12px', color: '#94a3b8' }}>
+                {user ? '✓ Đã mở khóa Satoshi, Madara, Himeko' : '⚡ Khách chỉ được dùng Satoshi · Đăng nhập để mở khóa'}
+              </div>
+            </div>
+
+            <div className="char-roster-cards-grid">
+              {CHARACTERS.map(c => {
+                const isCurPreview = previewCharId === c.id
+                const isCurSelected = selectedCharacterId === c.id
+                const isCardLocked = !user && c.id !== 'satoshi'
+
+                return (
+                  <div
+                    key={c.id}
+                    className={`char-roster-card ${isCurPreview ? 'active' : ''}`}
+                    onClick={() => {
+                      setPreviewCharId(c.id)
+                      setPreviewEmotion('happy')
+                      playSound('select', soundEnabled)
+                    }}
+                    style={{
+                      borderColor: isCurPreview ? c.accentColor : undefined,
+                    }}
+                  >
+                    {isCurSelected && (
+                      <div className="char-card-active-check" style={{ background: '#22c55e' }} title="Đang sử dụng">
+                        ✓
+                      </div>
+                    )}
+                    {isCardLocked && (
+                      <div className="char-card-lock-badge">
+                        <Lock size={10} /> Khóa
+                      </div>
+                    )}
+
+                    <div className="char-roster-card-avatar">
+                      <CharacterAvatar
+                        characterId={c.id}
+                        emotion={isCurPreview ? 'happy' : 'idle'}
+                        size="md"
+                        interactive={false}
+                        useVideo={true}
+                      />
+                    </div>
+
+                    <strong style={{ fontSize: '15px', color: isCurPreview ? '#facc15' : '#ffffff', marginBottom: '4px' }}>
+                      {c.name}
+                    </strong>
+
+                    <span style={{ fontSize: '11px', color: '#94a3b8', marginBottom: '10px' }}>
+                      {c.title}
+                    </span>
+
+                    <div
+                      className="char-card-ult-badge"
+                      style={{
+                        background: `${c.ultimate.bannerColor}28`,
+                        borderColor: `${c.ultimate.bannerColor}77`,
+                        width: '100%',
+                      }}
+                    >
+                      <span>{c.ultimate.icon}</span>
+                      <span style={{ fontSize: '11px', fontWeight: 900, color: '#ffffff' }}>{c.ultimate.name}</span>
+                      <span style={{ fontSize: '10px', color: '#fde047', fontWeight: 800 }}>({c.ultimate.energyCost}%)</span>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        </div>
+
+        {renderSharedModals()}
+      </main>
+    )
+  }
+
+  /* ══════════════════════════════════════════════
+     SCREEN 3: DEDICATED RANKED ARENA PAGE (TRANG ĐẤU XẾP HẠNG RIÊNG)
+     ══════════════════════════════════════════════ */
+  const renderRankedArenaPage = () => {
+    return (
+      <main className="ranked-arena-page-wrapper">
+        {/* Top bar */}
+        <div className="ranked-arena-top-bar">
+          <button
+            className="btn-back-menu"
+            onClick={() => {
+              if (isMatchmaking) cancelMatchmakingQueue()
+              playSound('select', soundEnabled)
+              setActiveLobbyScreen('menu')
+            }}
+          >
+            <ArrowLeft size={16} /> Quay Lại Sảnh
+          </button>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <span style={{ fontSize: '24px' }}>⚔️</span>
+            <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 900, color: '#facc15', letterSpacing: '0.04em' }}>
+              ĐẤU TRƯỜNG XẾP HẠNG (RANKED ARENA)
+            </h2>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {user ? (
+              <span className="rank-pill" style={{ color: userRank.color, borderColor: userRank.color, padding: '4px 12px', fontSize: '12.5px', fontWeight: 900 }}>
+                {userRank.icon} {userRank.name} ({rankPoints.toLocaleString()} RP)
+              </span>
+            ) : (
+              <span className="rank-pill" style={{ color: '#cbd5e1', borderColor: '#64748b' }}>
+                🔒 Khách chưa có Rank
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Hero Rank Banner */}
+        <div className="ranked-hero-banner">
+          <div className="ranked-user-emblem-wrap">
+            <div className="ranked-emblem-badge" style={{ borderColor: userRank.color }}>
+              {userRank.icon}
+            </div>
+            <div>
+              <div style={{ fontSize: '13px', color: '#cbd5e1', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                BẬC XẾP HẠNG HIỆN TẠI
+              </div>
+              <h1 style={{ margin: '2px 0 6px', fontSize: '28px', fontWeight: 900, color: userRank.color }}>
+                {userRank.name}
+              </h1>
+              <div style={{ display: 'flex', gap: '14px', alignItems: 'center', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '14px', color: '#facc15', fontWeight: 800 }}>
+                  ⚡ {rankPoints.toLocaleString()} Điểm Rank (RP)
+                </span>
+                <span style={{ fontSize: '13px', color: '#94a3b8' }}>
+                  Tỉ lệ thắng: <strong style={{ color: '#4ade80' }}>68.5%</strong>
+                </span>
+                <span style={{ fontSize: '13px', color: '#94a3b8' }}>
+                  Chiến thần: <strong style={{ color: '#38bdf8' }}>{playerName}</strong>
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Character Ready Card */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '14px', background: 'rgba(0,0,0,0.3)', padding: '10px 18px', borderRadius: '18px', border: '1px solid rgba(255,255,255,0.1)' }}>
+            <CharacterAvatar characterId={selectedCharacterId} emotion="idle" size="md" useVideo={useVideoAvatar} />
+            <div>
+              <div style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 800 }}>NHÂN VẬT XUẤT TRẬN</div>
+              <div style={{ fontSize: '15px', fontWeight: 900, color: '#facc15' }}>
+                {getCharacterById(selectedCharacterId).name}
+              </div>
+              <button
+                style={{ background: 'none', border: 'none', color: '#38bdf8', fontSize: '11.5px', fontWeight: 800, padding: 0, cursor: 'pointer', marginTop: '2px' }}
+                onClick={() => {
+                  setPreviewCharId(selectedCharacterId)
+                  setActiveLobbyScreen('character-select')
+                }}
+              >
+                Đổi nhân vật ➔
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Center Matchmaking Console */}
+        <div className="ranked-matchmaking-console">
+          {!user ? (
+            <div style={{ padding: '24px 0' }}>
+              <div style={{ fontSize: '42px', marginBottom: '12px' }}>🔒</div>
+              <h3 style={{ color: '#f8fafc', fontSize: '20px', fontWeight: 900, margin: '0 0 8px' }}>
+                ĐĂNG NHẬP ĐỂ THAM GIA ĐẤU RANK
+              </h3>
+              <p style={{ color: '#94a3b8', maxWidth: '480px', margin: '0 auto 20px', fontSize: '14px', lineHeight: 1.5 }}>
+                Chế độ Đấu Xếp Hạng dành riêng cho các thành viên có tài khoản để lưu điểm Elo/RP, thăng hạng mùa giải và tranh đoạt vị trí trên Bảng Vàng!
+              </p>
+              <button
+                className="btn-start-ranked-queue"
+                onClick={() => {
+                  setAuthMode('login')
+                  setShowAuthModal(true)
+                }}
+              >
+                <LogIn size={20} /> ĐĂNG NHẬP / ĐĂNG KÝ NGAY
+              </button>
+            </div>
+          ) : !isMatchmaking ? (
+            <div style={{ padding: '20px 0' }}>
+              <div style={{ fontSize: '14px', color: '#38bdf8', fontWeight: 800, letterSpacing: '0.08em', marginBottom: '6px' }}>
+                📡 HỆ THỐNG GHÉP ĐỐI THỦ THỜI GIAN THỰC
+              </div>
+              <h2 style={{ fontSize: '26px', fontWeight: 900, color: '#ffffff', margin: '0 0 16px' }}>
+                SẴN SÀNG THI ĐẤU ĐỐI KHÁNG ĐỈNH CAO?
+              </h2>
+              <p style={{ color: '#94a3b8', maxWidth: '520px', margin: '0 auto 24px', fontSize: '13.5px', lineHeight: 1.5 }}>
+                Hệ thống tự động tìm kiếm người chơi cùng bậc Rank hoặc AI Bot tương xứng. Tốc độ vào trận tức thì, độ trễ 0ms!
+              </p>
+              <button
+                className="btn-start-ranked-queue"
+                onClick={startMatchmaking}
+              >
+                <Sparkles size={22} /> BẮT ĐẦU TÌM TRẬN NGAY
+              </button>
+            </div>
+          ) : !foundMatch ? (
+            /* Radar scanning */
+            <div style={{ maxWidth: '480px', margin: '0 auto' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+                <span style={{ fontSize: '15px', color: '#38bdf8', fontWeight: 900 }}>
+                  📡 ĐANG QUÉT TÌM ĐỐI THỦ CÙNG BẬC RANK...
+                </span>
+                <span style={{ fontSize: '13px', color: '#facc15', fontWeight: 800 }}>
+                  {matchWaitSeconds}s
+                </span>
+              </div>
+
+              <div className="radar-screen-box">
+                <div className="radar-sweep-arm" />
+                <div className="radar-ping-blip" style={{ top: '35%', left: '38%' }} />
+                <div className="radar-ping-blip" style={{ top: '68%', left: '64%', animationDelay: '0.9s' }} />
+                <div className="radar-center-icon">
+                  <CharacterAvatar characterId={selectedCharacterId} emotion="combo" size="sm" interactive={false} useVideo={useVideoAvatar} />
+                </div>
+              </div>
+
+              <div style={{ margin: '16px 0 20px', fontSize: '13px', color: '#cbd5e1' }}>
+                Thời gian tìm kiếm: <strong style={{ color: '#facc15' }}>{matchWaitSeconds}s</strong> · Ước tính: <strong style={{ color: '#38bdf8' }}>~{averageWaitSeconds}s</strong>
+              </div>
+
+              <button
+                className="modal-btn-secondary"
+                onClick={cancelMatchmakingQueue}
+                style={{ padding: '10px 32px' }}
+              >
+                HỦY TÌM KIẾM
+              </button>
+            </div>
+          ) : (
+            /* Found match VS */
+            <div className="vs-faceoff-container" style={{ maxWidth: '520px', margin: '0 auto' }}>
+              <div style={{ fontSize: '22px', fontWeight: 900, color: '#facc15', marginBottom: '18px' }}>
+                ⚔️ ĐÃ TÌM THẤY TRẬN ĐẤU XẾP HẠNG! ⚔️
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '24px' }}>
+                <div style={{ textAlign: 'center' }}>
+                  <CharacterAvatar characterId={selectedCharacterId} emotion="combo" size="md" interactive={false} useVideo={useVideoAvatar} />
+                  <div style={{ fontWeight: 800, color: '#f8fafc', fontSize: '14px', marginTop: '6px' }}>{playerName}</div>
+                  <div style={{ fontSize: '11.5px', color: userRank.color, fontWeight: 800 }}>{userRank.icon} {userRank.name}</div>
+                </div>
+                <div className="vs-badge-animated">VS</div>
+                <div style={{ textAlign: 'center' }}>
+                  <CharacterAvatar characterId={foundMatch.rivalCharId} emotion="combo" size="md" interactive={false} useVideo={useVideoAvatar} />
+                  <div style={{ fontWeight: 800, color: '#f8fafc', fontSize: '14px', marginTop: '6px' }}>{foundMatch.rivalName}</div>
+                  <div style={{ fontSize: '11.5px', color: '#fb923c', fontWeight: 800 }}>{foundMatch.rivalRankIcon} {foundMatch.rivalRank}</div>
+                </div>
+              </div>
+              <div style={{ marginTop: '20px', fontSize: '13px', color: '#38bdf8', fontWeight: 800 }}>
+                ⚡ ĐANG KẾT NỐI VÀO BÀN THI ĐẤU...
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Integrated Ranked Leaderboard Table */}
+        <div style={{ background: 'rgba(15,23,42,0.7)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '20px', padding: '24px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Trophy size={20} color="#facc15" />
+              <h3 style={{ margin: 0, fontSize: '17px', fontWeight: 900, color: '#f8fafc' }}>
+                BẢNG XẾP HẠNG CAO THỦ MÙA GIẢI
+              </h3>
+            </div>
+            <button
+              className="btn-ranked-bxh"
+              onClick={() => {
+                setShowLeaderboard(true)
+                setLeaderboardTab('rankings')
+                fetchRankings()
+              }}
+            >
+              Xem Chi Tiết Đầy Đủ ➔
+            </button>
+          </div>
+
+          <div style={{ overflowX: 'auto' }}>
+            <table className="leaderboard-table" style={{ width: '100%' }}>
+              <thead>
+                <tr>
+                  <th>HẠNG</th>
+                  <th>NGƯỜI CHƠI</th>
+                  <th>BẬC RANK</th>
+                  <th>ĐIỂM RP</th>
+                  <th>TỈ LỆ THẮNG</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(rankedPlayers.length > 0 ? rankedPlayers.slice(0, 8) : [
+                  { rank: 1, displayName: 'DragonMaster', rankTier: { name: 'Thách Đấu', icon: '👑' }, rankPoints: 2450, rankWins: 55, rankLosses: 12 },
+                  { rank: 2, displayName: 'PikaPro_VN', rankTier: { name: 'Cao Thủ', icon: '💎' }, rankPoints: 2180, rankWins: 48, rankLosses: 15 },
+                  { rank: 3, displayName: 'ShadowStrike', rankTier: { name: 'Cao Thủ', icon: '💎' }, rankPoints: 2020, rankWins: 42, rankLosses: 16 },
+                  { rank: 4, displayName: 'KasumiWave', rankTier: { name: 'Kim Cương', icon: '🔷' }, rankPoints: 1890, rankWins: 38, rankLosses: 19 },
+                  { rank: 5, displayName: 'ElectroVolt', rankTier: { name: 'Kim Cương', icon: '🔷' }, rankPoints: 1750, rankWins: 35, rankLosses: 18 },
+                ]).map((item: any, idx: number) => {
+                  const wins = item.rankWins || 0
+                  const losses = item.rankLosses || 0
+                  const total = wins + losses
+                  const winRate = total > 0 ? `${Math.round((wins / total) * 100)}%` : '65%'
+                  return (
+                    <tr key={idx}>
+                      <td>
+                        <span className={`rank-number rank-${item.rank || idx + 1}`}>
+                          {item.rank || idx + 1}
+                        </span>
+                      </td>
+                      <td>
+                        <strong style={{ color: '#f8fafc' }}>{item.displayName || item.username}</strong>
+                      </td>
+                      <td>
+                        <span style={{ fontWeight: 800, color: '#facc15' }}>
+                          {item.rankTier?.icon || '⭐'} {item.rankTier?.name || 'Vàng'}
+                        </span>
+                      </td>
+                      <td>
+                        <strong style={{ color: '#38bdf8' }}>{item.rankPoints?.toLocaleString()} RP</strong>
+                      </td>
+                      <td>
+                        <span style={{ color: '#4ade80', fontWeight: 700 }}>{winRate}</span>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {renderSharedModals()}
+      </main>
+    )
+  }
+
+  /* ══════════════════════════════════════════════
      SCREEN 1: LOBBY / MENU (Giao Diện Ban Đầu)
      ══════════════════════════════════════════════ */
   if (!inGame) {
+    if (activeLobbyScreen === 'character-select') {
+      return renderCharacterSelectPage()
+    }
+
+    if (activeLobbyScreen === 'ranked') {
+      return renderRankedArenaPage()
+    }
+
     return (
       <main className="pikachu-app" style={{ position: 'relative', overflowX: 'hidden' }}>
         {/* Portrait Orientation Lock Overlay - Mobile Only */}
@@ -3273,8 +4166,8 @@ export function MirrorRushGame() {
                 onClick={toggleBgm}
                 title="Bật / Tắt nhạc nền 8-bit retro"
               >
-                <Music size={14} />
-                <span>Nhạc 8-bit: <strong>{bgmEnabled ? 'BẬT' : 'TẮT'}</strong></span>
+                <Music size={14} className={bgmEnabled && audioReady ? 'animate-pulse' : ''} />
+                <span>Nhạc 8-bit: <strong>{bgmEnabled ? (audioReady ? 'BẬT 🎵' : 'BẬT (Chạm để nghe)') : 'TẮT'}</strong></span>
               </button>
               <button
                 className={`btn-bgm-toggle ${!soundEnabled ? 'muted' : ''}`}
@@ -3286,6 +4179,13 @@ export function MirrorRushGame() {
               >
                 {soundEnabled ? <Volume2 size={14} /> : <VolumeX size={14} />}
                 <span>Hiệu ứng: <strong>{soundEnabled ? 'BẬT' : 'TẮT'}</strong></span>
+              </button>
+              <button
+                className={`btn-bgm-toggle ${!useVideoAvatar ? 'muted' : ''}`}
+                onClick={() => setUseVideoAvatar(!useVideoAvatar)}
+                title="Bật / Tắt Avatar Video Nhân Vật Động"
+              >
+                <span>Avatar: <strong>{useVideoAvatar ? 'VIDEO 🎬' : 'PIXEL'}</strong></span>
               </button>
               <button
                 className="btn-bgm-toggle"
@@ -3311,14 +4211,15 @@ export function MirrorRushGame() {
 
           {/* Thanh Tài Khoản & Ví Xu PikaCoins */}
           <div className="user-profile-bar">
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
               <CharacterAvatar
                 characterId={selectedCharacterId}
                 emotion="idle"
-                size="sm"
+                size="md"
+                useVideo={useVideoAvatar}
               />
               <div>
-                <div style={{ fontWeight: 900, fontSize: '14.5px', color: '#ffffff', display: 'flex', alignItems: 'center', gap: '6px', textShadow: '-1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000' }}>
+                <div style={{ fontWeight: 900, fontSize: '15px', color: '#ffffff', display: 'flex', alignItems: 'center', gap: '6px', textShadow: '-1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000' }}>
                   <span>{user ? user.displayName : 'Khách (Guest)'}</span>
                   {user ? (
                     <span style={{ fontSize: '11px', color: '#4ade80', background: 'rgba(34,197,94,0.2)', padding: '1px 7px', borderRadius: '5px', border: '1px solid rgba(34,197,94,0.4)', fontWeight: 800 }}>
@@ -3403,118 +4304,87 @@ export function MirrorRushGame() {
               />
             </div>
 
-            {/* CHỌN NHÂN VẬT PIXEL ART (Tối giản: Chỉ hiển thị Avatar + Tên + Tuyệt kỹ) */}
-            <div className="char-select-box">
-              <div className="char-select-header">
-                <div className="char-select-title">
-                  <span>👾</span>
-                  <span>CHỌN NHÂN VẬT PIXEL ART</span>
-                  {user ? (
-                    <span style={{ fontSize: '11px', color: '#4ade80', background: 'rgba(34,197,94,0.2)', padding: '2px 8px', borderRadius: '6px', border: '1px solid rgba(34,197,94,0.4)', textTransform: 'none', fontWeight: 800 }}>
-                      ✓ Đã mở khóa 8 nhân vật
-                    </span>
-                  ) : (
-                    <span style={{ fontSize: '11px', color: '#fde047', background: 'rgba(245,158,11,0.2)', padding: '2px 8px', borderRadius: '6px', border: '1px solid rgba(245,158,11,0.4)', textTransform: 'none', fontWeight: 800 }}>
-                      Mặc định: Satoshi
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              <div className="char-select-grid">
-                {CHARACTERS.map(c => {
-                  const isSelected = selectedCharacterId === c.id
-                  const isLocked = !user && c.id !== 'satoshi'
-
-                  return (
-                    <div
-                      key={c.id}
-                      className={`char-card-item ${isSelected ? 'selected' : ''} ${isLocked ? 'locked' : ''}`}
-                      onClick={() => handleSelectCharacter(c.id)}
-                      title={isLocked ? `Đăng nhập để chọn ${c.name}` : c.name}
-                    >
-                      {isSelected && <div className="char-card-active-check">✓</div>}
-                      {isLocked && (
-                        <div className="char-card-lock-badge">
-                          <Lock size={10} /> Khóa
-                        </div>
-                      )}
-
-                      <CharacterAvatar
-                        characterId={c.id}
-                        emotion={isSelected ? 'happy' : 'idle'}
-                        size="sm"
-                        interactive={false}
-                      />
-
-                      <div className="char-card-name" style={{ color: isSelected ? '#fde047' : '#ffffff' }}>
-                        {c.name}
+            {/* THẺ NHÂN VẬT ĐANG DÙNG (CỔNG VÀO TRANG CHỌN TƯỚNG RIÊNG) */}
+            {(() => {
+              const curChar = getCharacterById(selectedCharacterId)
+              return (
+                <div
+                  style={{
+                    background: 'rgba(15, 23, 42, 0.4)',
+                    backdropFilter: 'blur(10px)',
+                    WebkitBackdropFilter: 'blur(10px)',
+                    border: `2px solid ${curChar.accentColor}`,
+                    borderRadius: '20px',
+                    padding: '16px 20px',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    flexWrap: 'wrap',
+                    gap: '14px',
+                    boxShadow: `0 8px 24px ${curChar.glowColor}25`,
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                    <CharacterAvatar characterId={curChar.id} emotion="idle" size="md" useVideo={useVideoAvatar} />
+                    <div>
+                      <div style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 800, textTransform: 'uppercase' }}>
+                        NHÂN VẬT ĐANG CHỌN XUẤT TRẬN
                       </div>
-
-                      {/* Huy hiệu Chiêu Thức Cuối của nhân vật */}
-                      <div className="char-card-ult-badge" style={{ background: `${c.ultimate.bannerColor}28`, borderColor: `${c.ultimate.bannerColor}77` }}>
-                        <span>{c.ultimate.icon}</span>
-                        <span style={{ fontSize: '10.5px', fontWeight: 900, color: '#ffffff' }}>{c.ultimate.name}</span>
-                        <span style={{ fontSize: '9.5px', color: '#fde047', fontWeight: 800 }}>({c.ultimate.energyCost}%)</span>
+                      <div style={{ fontSize: '18px', fontWeight: 900, color: '#facc15' }}>
+                        {curChar.name} <span style={{ fontSize: '13px', color: '#cbd5e1', fontWeight: 700 }}>· {curChar.title}</span>
+                      </div>
+                      <div style={{ fontSize: '12px', color: '#fef08a', fontStyle: 'italic', marginTop: '2px' }}>
+                        "{curChar.ultimate.voiceLine}"
                       </div>
                     </div>
-                  )
-                })}
-              </div>
-            </div>
+                  </div>
 
-            {/* ĐẤU XẾP HẠNG ONLINE (RANKED MATCHMAKING) */}
-            <div className={`ranked-match-card ${!user ? 'guest-locked' : ''}`}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  <div style={{ fontSize: '26px', background: 'rgba(250,204,21,0.15)', width: '46px', height: '46px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '12px', border: '1px solid rgba(250,204,21,0.3)' }}>
+                  <button
+                    className="btn-change-character"
+                    onClick={() => {
+                      setPreviewCharId(selectedCharacterId)
+                      setPreviewEmotion('idle')
+                      playSound('select', soundEnabled)
+                      setActiveLobbyScreen('character-select')
+                    }}
+                  >
+                    <span>👾</span>
+                    <span>ĐỔI NHÂN VẬT</span>
+                  </button>
+                </div>
+              )
+            })()}
+
+            {/* THẺ ĐẤU XẾP HẠNG */}
+            <div className="ranked-match-card">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                  <div style={{ fontSize: '28px', background: 'rgba(250,204,21,0.15)', width: '52px', height: '52px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '16px', border: '1px solid rgba(250,204,21,0.3)' }}>
                     ⚔️
                   </div>
                   <div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                      <strong style={{ fontSize: '15px', color: '#ffffff', letterSpacing: '0.03em', textShadow: '-1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000' }}>ĐẤU XẾP HẠNG (RANKED)</strong>
-                      {user ? (
-                        <span className="rank-pill" style={{ color: userRank.color, borderColor: userRank.color, fontSize: '11.5px', fontWeight: 800 }}>
-                          {userRank.icon} {userRank.name} ({rankPoints.toLocaleString()} RP)
-                        </span>
-                      ) : (
-                        <span className="rank-pill" style={{ color: '#cbd5e1', borderColor: '#64748b', fontSize: '11.5px', fontWeight: 800 }}>
-                          🔒 Cần Đăng Nhập
-                        </span>
-                      )}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <strong style={{ fontSize: '16px', color: '#ffffff', letterSpacing: '0.03em' }}>ĐẤU TRƯỜNG XẾP HẠNG (RANKED)</strong>
+                      <span className="rank-pill" style={{ color: user ? userRank.color : '#cbd5e1', borderColor: user ? userRank.color : '#64748b', fontSize: '11.5px', fontWeight: 900 }}>
+                        {user ? `${userRank.icon} ${userRank.name} (${rankPoints.toLocaleString()} RP)` : '🔒 Cần Đăng Nhập'}
+                      </span>
                     </div>
-                    <div style={{ fontSize: '12.5px', color: '#cbd5e1', marginTop: '2px', textShadow: '0 1px 2px #000' }}>
-                      {user ? (
-                        <span>Bậc Rank: <strong style={{ color: userRank.color }}>{userRank.name}</strong> · Ghép cặp tương đương trình độ</span>
-                      ) : (
-                        <span style={{ color: '#fbbf24', fontWeight: 700 }}>Khách chỉ chơi Solo & Đấu Bot · Đăng nhập để mở khóa Đấu Rank</span>
-                      )}
+                    <div style={{ fontSize: '12.5px', color: '#cbd5e1', marginTop: '3px' }}>
+                      {user ? `Bậc ${userRank.name} · Thi đấu tích điểm leo Rank mùa giải & tranh cúp Bảng Vàng` : 'Đăng nhập để mở khóa Đấu Rank và ghi danh lịch sử'}
                     </div>
                   </div>
                 </div>
 
-                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                  <button
-                    className="btn-ranked-bxh"
-                    onClick={() => {
-                      setShowLeaderboard(true)
-                      setLeaderboardTab('rankings')
-                      fetchRankings()
-                    }}
-                    title="Xem Bảng Xếp Hạng Rank"
-                  >
-                    👑 BXH Rank
-                  </button>
-
-                  <button
-                    className="btn-ranked-queue"
-                    onClick={startMatchmaking}
-                    title={user ? "Tìm trận đấu xếp hạng nhanh" : "Đăng nhập để tham gia đấu rank"}
-                  >
-                    <span style={{ fontSize: '13px', fontWeight: 900 }}>{user ? '📡 TÌM TRẬN NHANH' : '🔒 ĐĂNG NHẬP ĐẤU RANK'}</span>
-                    <small style={{ fontSize: '10px', opacity: 0.9 }}>{user ? '~8s có trận' : 'Mở khóa bậc Rank'}</small>
-                  </button>
-                </div>
+                <button
+                  className="btn-ranked-queue"
+                  style={{ padding: '10px 20px' }}
+                  onClick={() => {
+                    playSound('select', soundEnabled)
+                    setActiveLobbyScreen('ranked')
+                  }}
+                >
+                  <span style={{ fontSize: '14px', fontWeight: 900 }}>⚔️ VÀO ĐẤU RANK</span>
+                </button>
               </div>
             </div>
 
@@ -3730,8 +4600,15 @@ export function MirrorRushGame() {
             onClick={toggleBgm}
             title="Bật / Tắt nhạc nền 8-bit"
           >
-            <Music size={14} color={bgmEnabled ? '#34d399' : '#94a3b8'} />
-            <span>Nhạc: <strong style={{ color: bgmEnabled ? '#34d399' : '#94a3b8' }}>{bgmEnabled ? 'BẬT' : 'TẮT'}</strong></span>
+            <Music size={14} color={bgmEnabled ? '#34d399' : '#94a3b8'} className={bgmEnabled && audioReady ? 'animate-pulse' : ''} />
+            <span>Nhạc: <strong style={{ color: bgmEnabled ? '#34d399' : '#94a3b8' }}>{bgmEnabled ? (audioReady ? 'BẬT 🎵' : 'BẬT') : 'TẮT'}</strong></span>
+          </button>
+          <button
+            className="btn-back-menu"
+            onClick={() => setUseVideoAvatar(!useVideoAvatar)}
+            title="Chuyển đổi hình đại diện Video Anime sống động hoặc Pixel Cổ Điển"
+          >
+            <span>Avatar: <strong style={{ color: useVideoAvatar ? '#38bdf8' : '#94a3b8' }}>{useVideoAvatar ? '🎬 Video' : '👾 Pixel'}</strong></span>
           </button>
           <button
             className="btn-back-menu"
@@ -3857,21 +4734,136 @@ export function MirrorRushGame() {
       {playMode === 'solo' || boardMode === 'shared' ? (
         /* CHẾ ĐỘ 1 BẢNG (Solo hoặc PVP Chung 1 Bảng ở giữa) */
         <section className="arena-solo">
-          <div className={`board-frame ${isMeFrozen ? 'is-frozen' : ''} ${isMeFogged ? 'is-fogged' : ''} ${combo >= 2 ? 'combo-on-fire' : ''} ${equipped.boardTheme} ${equipped.boardFrame}`} style={{ width: '100%' }}>
+          {/* CỘT TAY TRÁI: NHÂN VẬT VIDEO HERO BATTLE PANEL */}
+          {playMode === 'solo' && (() => {
+            const curChar = getCharacterById(selectedCharacterId)
+            const canUse = energy >= curChar.ultimate.energyCost
+            const energyPercent = Math.min(100, Math.round((energy / curChar.ultimate.energyCost) * 100))
+
+            return (
+              <aside
+                className="battle-hero-side-panel"
+                style={{
+                  ['--hero-accent' as any]: curChar.accentColor,
+                  ['--hero-glow' as any]: curChar.glowColor,
+                }}
+              >
+                {/* Thẻ Nhân Vật Video Lớn Rõ Nét */}
+                <div className="hero-standee-card">
+                  <div className="hero-avatar-wrap">
+                    <CharacterAvatar
+                      domId="player-active-avatar"
+                      characterId={selectedCharacterId}
+                      emotion={playerEmotion}
+                      size="standee"
+                      shape="rect"
+                      showSpeech={playerEmotion !== 'idle'}
+                      useVideo={useVideoAvatar}
+                    />
+                    <div className="hero-aura-bracket-tl" style={{ borderColor: curChar.accentColor }} />
+                    <div className="hero-aura-bracket-tr" style={{ borderColor: curChar.accentColor }} />
+                    <div className="hero-aura-bracket-bl" style={{ borderColor: curChar.accentColor }} />
+                    <div className="hero-aura-bracket-br" style={{ borderColor: curChar.accentColor }} />
+                  </div>
+
+                  <div className="hero-meta-info">
+                    <div className="hero-player-name">{playerName}</div>
+                    <div className="hero-char-tag" style={{ color: curChar.accentColor }}>{curChar.name}</div>
+                    <div className="hero-char-title">{curChar.title}</div>
+                  </div>
+                </div>
+
+                {/* BỘ ĐIỀU KHIỂN & THANH NĂNG LƯỢNG CHIÊU THỨC */}
+                <div className="hero-ultimate-console">
+                  <div className="hero-energy-header">
+                    <span className="hero-energy-label">⚡ NĂNG LƯỢNG CHIÊU</span>
+                    <span className="hero-energy-val" style={{ color: canUse ? '#4ade80' : '#facc15' }}>
+                      {energy}% / {curChar.ultimate.energyCost}%
+                    </span>
+                  </div>
+
+                  <div className="hero-energy-track">
+                    <div
+                      className={`hero-energy-fill ${canUse ? 'is-full' : ''}`}
+                      style={{
+                        width: `${energyPercent}%`,
+                        background: canUse
+                          ? 'linear-gradient(90deg, #f59e0b, #ef4444, #facc15)'
+                          : `linear-gradient(90deg, #3b82f6, ${curChar.accentColor})`,
+                      }}
+                    />
+                  </div>
+
+                  {/* Nút Chiêu Thức Hoành Tráng Siêu Đẹp */}
+                  <button
+                    className={`hero-ultimate-btn char-${curChar.id} ${canUse ? 'ready' : ''}`}
+                    onClick={triggerUltimateSkill}
+                    disabled={!canUse}
+                    title={`${curChar.ultimate.name}: ${curChar.ultimate.description}`}
+                  >
+                    <div className="hero-btn-icon-wrap">{curChar.ultimate.icon}</div>
+                    <div className="hero-btn-text-wrap">
+                      <span className="hero-btn-title">{curChar.ultimate.name}</span>
+                      <span className="hero-btn-badge">
+                        {canUse ? '🔥 BẤM ĐỂ TUNG CHIÊU!' : `Tích lũy (${energy}/${curChar.ultimate.energyCost}%)`}
+                      </span>
+                    </div>
+                  </button>
+
+                  <div className="hero-ult-desc-box" style={{ borderLeftColor: curChar.accentColor }}>
+                    {curChar.ultimate.description}
+                  </div>
+                </div>
+              </aside>
+            )
+          })()}
+
+          <div className={`board-frame ${isMeFrozen ? 'is-frozen' : ''} ${isMeFogged ? 'is-fogged' : ''} ${combo >= 2 ? 'combo-on-fire' : ''} ${equipped.boardTheme} ${equipped.boardFrame}`} style={{ flex: 1, minWidth: 0 }}>
             {isImmune && <div className="debuff-banner" style={{ background: 'rgba(56,189,248,0.25)', color: '#38bdf8', borderColor: '#38bdf8' }}>🛡️ HÀO QUANG BẤT HOẠI (MIỄN NHIỄM HIỆU ỨNG)</div>}
             {doubleScoreTurnsLeft > 0 && <div className="debuff-banner" style={{ background: 'rgba(250,204,21,0.25)', color: '#facc15', borderColor: '#facc15' }}>⚡ X2 ĐIỂM SỐ ({doubleScoreTurnsLeft} NƯỚC NỐI TIẾP THEO)</div>}
             {timerFrozenUntil > Date.now() && <div className="debuff-banner" style={{ background: 'rgba(147,197,253,0.25)', color: '#bfdbfe', borderColor: '#bfdbfe' }}>❄️ ĐỒNG HỒ ĐANG NGƯNG ĐỌNG</div>}
+            {thunderRadarUntil > Date.now() && <div className="debuff-banner" style={{ background: 'rgba(234,179,8,0.25)', color: '#fde047', borderColor: '#eab308' }}>⚡ RADAR HOÀNG KIM (CHỈ ĐƯỜNG TẤT CẢ NƯỚC NỐI)</div>}
+            {solarOverdriveUntil > Date.now() && <div className="debuff-banner" style={{ background: 'rgba(239,68,68,0.25)', color: '#fca5a5', borderColor: '#ef4444' }}>🔥 SOLAR OVERDRIVE (x3 ĐIỂM & HỒI +2s MỖI NƯỚC NỐI)</div>}
             {isMeFrozen && <div className="debuff-banner">❄ BẠN ĐANG BỊ ĐÓNG BĂNG!</div>}
             {isMeFogged && <div className="debuff-banner" style={{ color: '#94a3b8', borderColor: '#94a3b8' }}>🌫 BẠN ĐANG BỊ MÙ SƯƠNG!</div>}
-            {combo >= 2 && <div className="combo-fire-banner">🔥 COMBO x{combo}! ON FIRE 🔥</div>}
+            {activeLaserCross && (
+              <div className="laser-cross-anim">
+                <div
+                  className="laser-beam-horizontal"
+                  style={{ top: `${((activeLaserCross.row + 0.5) / dims.rows) * 100}%` }}
+                />
+                <div
+                  className="laser-beam-vertical"
+                  style={{ left: `${((activeLaserCross.col + 0.5) / dims.cols) * 100}%` }}
+                />
+              </div>
+            )}
+            {combo >= 2 && (
+              <div className="combo-fire-banner">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', marginBottom: '4px' }}>
+                  <span>🔥 COMBO x{combo}! ON FIRE 🔥</span>
+                  <span style={{ fontSize: '11px', color: '#fef08a', fontWeight: 900 }}>⏳ {comboSecondsLeft}s</span>
+                </div>
+                <div className="combo-timer-track">
+                  <div
+                    className="combo-timer-fill"
+                    style={{ width: `${Math.min(100, (comboSecondsLeft / 4.5) * 100)}%` }}
+                  />
+                </div>
+              </div>
+            )}
 
             {playMode === 'solo' && (
-              <div className="board-header" style={{ justifyContent: 'space-between', padding: '6px 14px' }}>
-                <div className="board-player-info">
-                  <CharacterAvatar characterId={selectedCharacterId} emotion={playerEmotion} size="sm" showSpeech={playerEmotion !== 'idle'} />
-                  <span>{playerName}</span>
+              <div className="board-header" style={{ justifyContent: 'space-between', padding: '8px 16px', alignItems: 'center' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontSize: '13px', fontWeight: 900, color: '#f8fafc', letterSpacing: '0.04em' }}>
+                    🎮 BÀN ĐẤU SOLO
+                  </span>
+                  <span style={{ fontSize: '11px', background: 'rgba(250,204,21,0.15)', color: '#facc15', border: '1px solid rgba(250,204,21,0.3)', borderRadius: '6px', padding: '2px 8px', fontWeight: 800 }}>
+                    {getCharacterById(selectedCharacterId).name}
+                  </span>
                 </div>
-                {/* Nút Tuyệt Kỹ Solo */}
+                {/* Nút Tuyệt Kỹ Gọn Đẹp */}
                 {(() => {
                   const curChar = getCharacterById(selectedCharacterId)
                   const canUse = energy >= curChar.ultimate.energyCost
@@ -3880,12 +4872,30 @@ export function MirrorRushGame() {
                       className={`ultimate-skill-btn char-${curChar.id} ${canUse ? 'ready' : ''}`}
                       onClick={triggerUltimateSkill}
                       disabled={!canUse}
-                      style={{ padding: '4px 12px', fontSize: '12px' }}
+                      style={{
+                        padding: '6px 14px',
+                        display: 'inline-flex',
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: '8px',
+                        width: 'auto',
+                        minWidth: 'unset',
+                        maxWidth: '300px',
+                      }}
                       title={`${curChar.ultimate.name}: ${curChar.ultimate.description} (Cần ${curChar.ultimate.energyCost}% NL)`}
                     >
-                      <span style={{ fontSize: '15px' }}>{curChar.ultimate.icon}</span>
-                      <span className="ult-name" style={{ fontSize: '11px' }}>{curChar.ultimate.name}</span>
-                      <small style={{ fontSize: '10px', color: '#facc15' }}>({energy}/{curChar.ultimate.energyCost}%)</small>
+                      <span style={{ fontSize: '16px' }}>{curChar.ultimate.icon}</span>
+                      <span style={{ fontSize: '12px', fontWeight: 800 }}>{curChar.ultimate.name.split('(')[0]}</span>
+                      <span style={{
+                        fontSize: '11px',
+                        fontWeight: 900,
+                        background: canUse ? '#22c55e' : 'rgba(0,0,0,0.4)',
+                        color: '#ffffff',
+                        borderRadius: '6px',
+                        padding: '2px 6px',
+                      }}>
+                        {canUse ? 'SẴN SÀNG!' : `${energy}%/${curChar.ultimate.energyCost}%`}
+                      </span>
                     </button>
                   )
                 })()}
@@ -3895,7 +4905,14 @@ export function MirrorRushGame() {
             {playMode !== 'solo' && boardMode === 'shared' && (
               <div className="board-header">
                 <div className="board-player-info">
-                  <CharacterAvatar characterId={selectedCharacterId} emotion={playerEmotion} size="sm" showSpeech={playerEmotion !== 'idle'} />
+                  <CharacterAvatar
+                    domId="player-active-avatar"
+                    characterId={selectedCharacterId}
+                    emotion={playerEmotion}
+                    size="sm"
+                    showSpeech={playerEmotion !== 'idle'}
+                    useVideo={useVideoAvatar}
+                  />
                   <span>{playerName}: <strong style={{ color: '#facc15' }}>{score} đ</strong></span>
                 </div>
                 <div style={{ fontSize: '13px', fontWeight: 900, color: '#22c55e' }}>
@@ -3903,7 +4920,14 @@ export function MirrorRushGame() {
                 </div>
                 <div className="board-player-info">
                   <span>{rivalName}: <strong style={{ color: '#f43f5e' }}>{rivalScore} đ</strong></span>
-                  <CharacterAvatar characterId={rivalCharacterId} emotion={rivalEmotion} size="sm" showSpeech={rivalEmotion !== 'idle'} />
+                  <CharacterAvatar
+                    domId="rival-active-avatar"
+                    characterId={rivalCharacterId}
+                    emotion={rivalEmotion}
+                    size="sm"
+                    showSpeech={rivalEmotion !== 'idle'}
+                    useVideo={useVideoAvatar}
+                  />
                 </div>
               </div>
             )}
@@ -3943,7 +4967,8 @@ export function MirrorRushGame() {
                 matchingPair={matchingPair}
                 onSelect={onTileSelect}
                 linkPath={linkPath}
-                hintPair={hintPair}
+                hintPair={hintPair || activeRadarPair}
+                wildcardCoords={wildcardCoords}
                 spriteTheme={spriteTheme}
                 tileStyle={equipped.tileStyle}
                 lineEffect={equipped.lineEffect}
@@ -3964,13 +4989,35 @@ export function MirrorRushGame() {
             {isImmune && <div className="debuff-banner" style={{ background: 'rgba(56,189,248,0.25)', color: '#38bdf8', borderColor: '#38bdf8' }}>🛡️ HÀO QUANG BẤT HOẠI (MIỄN NHIỄM)</div>}
             {doubleScoreTurnsLeft > 0 && <div className="debuff-banner" style={{ background: 'rgba(250,204,21,0.25)', color: '#facc15', borderColor: '#facc15' }}>⚡ X2 ĐIỂM SỐ ({doubleScoreTurnsLeft} NƯỚC)</div>}
             {timerFrozenUntil > Date.now() && <div className="debuff-banner" style={{ background: 'rgba(147,197,253,0.25)', color: '#bfdbfe', borderColor: '#bfdbfe' }}>❄️ ĐỒNG HỒ ĐANG NGƯNG ĐỌNG</div>}
+            {thunderRadarUntil > Date.now() && <div className="debuff-banner" style={{ background: 'rgba(234,179,8,0.25)', color: '#fde047', borderColor: '#eab308' }}>⚡ RADAR HOÀNG KIM (CHỈ ĐƯỜNG TẤT CẢ NƯỚC NỐI)</div>}
+            {solarOverdriveUntil > Date.now() && <div className="debuff-banner" style={{ background: 'rgba(239,68,68,0.25)', color: '#fca5a5', borderColor: '#ef4444' }}>🔥 SOLAR OVERDRIVE (x3 ĐIỂM & HỒI +2s MỖI NƯỚC NỐI)</div>}
             {isMeFrozen && <div className="debuff-banner">❄ BẠN ĐANG BỊ ĐÓNG BĂNG!</div>}
             {isMeFogged && <div className="debuff-banner" style={{ color: '#94a3b8', borderColor: '#94a3b8' }}>🌫 BỊ MÙ SƯƠNG!</div>}
-            {combo >= 2 && <div className="combo-fire-banner">🔥 COMBO x{combo}! ON FIRE 🔥</div>}
+            {combo >= 2 && (
+              <div className="combo-fire-banner">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', marginBottom: '4px' }}>
+                  <span>🔥 COMBO x{combo}! ON FIRE 🔥</span>
+                  <span style={{ fontSize: '11px', color: '#fef08a', fontWeight: 900 }}>⏳ {comboSecondsLeft}s</span>
+                </div>
+                <div className="combo-timer-track">
+                  <div
+                    className="combo-timer-fill"
+                    style={{ width: `${Math.min(100, (comboSecondsLeft / 4.5) * 100)}%` }}
+                  />
+                </div>
+              </div>
+            )}
 
             <div className="board-header">
               <div className="board-player-info">
-                <CharacterAvatar characterId={selectedCharacterId} emotion={playerEmotion} size="sm" showSpeech={playerEmotion !== 'idle'} />
+                <CharacterAvatar
+                  domId="player-active-avatar"
+                  characterId={selectedCharacterId}
+                  emotion={playerEmotion}
+                  size="sm"
+                  showSpeech={playerEmotion !== 'idle'}
+                  useVideo={useVideoAvatar}
+                />
                 <span>{playerName} (BẠN)</span>
               </div>
               <div className="board-score-pill" style={{ color: '#facc15' }}>
@@ -4013,7 +5060,8 @@ export function MirrorRushGame() {
                 matchingPair={matchingPair}
                 onSelect={onTileSelect}
                 linkPath={linkPath}
-                hintPair={hintPair}
+                hintPair={hintPair || activeRadarPair}
+                wildcardCoords={wildcardCoords}
                 spriteTheme={spriteTheme}
                 tileStyle={equipped.tileStyle}
                 lineEffect={equipped.lineEffect}
@@ -4036,22 +5084,22 @@ export function MirrorRushGame() {
               <div className="energy-bar-fill" style={{ width: `${energy}%` }} />
             </div>
 
-            {/* CHIÊU THỨC CUỐI ĐẶC BIỆT CỦA NHÂN VẬT ĐANG DÙNG */}
+            {/* CHIÊU THỨC CUỐI ĐẶC BIỆT CỦA NHÂN VẬT (GỌN GÀNG KHỚP CỘT PVP) */}
             {(() => {
               const curChar = getCharacterById(selectedCharacterId)
               const canUse = energy >= curChar.ultimate.energyCost
               return (
                 <button
-                  className={`ultimate-skill-btn char-${curChar.id} ${canUse ? 'ready' : ''}`}
+                  className={`pvp-skill-btn pvp-ult-btn char-${curChar.id} ${canUse ? 'ready' : ''}`}
                   onClick={triggerUltimateSkill}
                   disabled={!canUse}
                   title={`${curChar.ultimate.name}: ${curChar.ultimate.description} (Cần ${curChar.ultimate.energyCost}% NL)`}
                 >
-                  <div style={{ fontSize: '18px' }}>{curChar.ultimate.icon}</div>
-                  <div className="ult-text-wrap">
-                    <span className="ult-name">{curChar.ultimate.name}</span>
-                    <span className="ult-cost">{curChar.ultimate.energyCost}% NL {canUse ? '· SẴN SÀNG!' : ''}</span>
-                  </div>
+                  <span style={{ fontSize: '16px' }}>{curChar.ultimate.icon}</span>
+                  <span style={{ fontWeight: 900 }}>TUYỆT KỸ</span>
+                  <small style={{ color: canUse ? '#fde047' : '#94a3b8' }}>
+                    {canUse ? 'SẴN SÀNG!' : `${curChar.ultimate.energyCost}% NL`}
+                  </small>
                 </button>
               )
             })()}
@@ -4104,7 +5152,14 @@ export function MirrorRushGame() {
 
             <div className="board-header">
               <div className="board-player-info">
-                <CharacterAvatar characterId={rivalCharacterId} emotion={rivalEmotion} size="sm" showSpeech={rivalEmotion !== 'idle'} />
+                <CharacterAvatar
+                  domId="rival-active-avatar"
+                  characterId={rivalCharacterId}
+                  emotion={rivalEmotion}
+                  size="sm"
+                  showSpeech={rivalEmotion !== 'idle'}
+                  useVideo={useVideoAvatar}
+                />
                 <span>{rivalName ? `${rivalName} (ĐỐI THỦ)` : 'Chờ người thứ 2... (TRỐNG)'}</span>
               </div>
               <div className="board-score-pill" style={{ color: '#f43f5e' }}>
@@ -4222,6 +5277,7 @@ export function MirrorRushGame() {
                   emotion={gameOver === 'win' ? 'win' : 'lose'}
                   size="lg"
                   showSpeech={true}
+                  useVideo={useVideoAvatar}
                 />
                 {gameOver === 'win' ? (
                   <div className="stage-winner-pedestal">
@@ -4244,6 +5300,7 @@ export function MirrorRushGame() {
                     emotion={gameOver === 'win' ? 'lose' : 'win'}
                     size="md"
                     showSpeech={true}
+                    useVideo={useVideoAvatar}
                   />
                   {gameOver === 'win' ? (
                     <div className="stage-loser-ground">

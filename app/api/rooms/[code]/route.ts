@@ -1,9 +1,15 @@
 import { NextResponse } from 'next/server'
 import { getRoom, updatePlayerAction } from '@/lib/game-state'
 
+export const dynamic = 'force-dynamic'
+export const fetchCache = 'force-no-store'
+export const revalidate = 0
+
 const NOCACHE_HEADERS = {
-  'Cache-Control': 'no-store, no-cache, must-revalidate',
+  'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
   'Pragma': 'no-cache',
+  'Surrogate-Control': 'no-store',
+  'Vercel-CDN-Cache-Control': 'no-store',
 }
 
 export async function GET(

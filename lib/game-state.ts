@@ -462,7 +462,264 @@ export function cancelMatchmaking(playerId: string): boolean {
   return globalThis.__PIKA_MATCH_QUEUE?.delete(playerId) || false
 }
 
-// Helper to generate a random board
+// Pathfinding and Solvability Validation Helpers for Server Board Generation
+function isCellEmpty(board: Cell[][], r: number, c: number, rows: number, cols: number): boolean {
+  if (r < 0 || r >= rows || c < 0 || c >= cols) return true
+  return board[r]?.[c] == null
+}
+
+function canWalkStraightServer(
+  board: Cell[][], from: Coord, to: Coord,
+  rows: number, cols: number, ignore1: Coord, ignore2: Coord
+): boolean {
+  if (from.row !== to.row && from.col !== to.col) return false
+  const dr = Math.sign(to.row - from.row)
+  const dc = Math.sign(to.col - from.col)
+  if (dr === 0 && dc === 0) return true
+
+  let r = from.row + dr
+  let c = from.col + dc
+  while (r !== to.row || c !== to.col) {
+    const isIgnored = (r === ignore1.row && c === ignore1.col) || (r === ignore2.row && c === ignore2.col)
+    if (!isIgnored && !isCellEmpty(board, r, c, rows, cols)) return false
+    r += dr
+    c += dc
+  }
+  return true
+}
+
+function findLinkPathServer(
+  board: Cell[][], a: Coord, b: Coord, rows: number, cols: number
+): Coord[] | null {
+  if (!board[a.row] || board[a.row][a.col] == null) return null
+  if (!board[b.row] || board[b.row][b.col] == null) return null
+  if (board[a.row][a.col] !== board[b.row][b.col]) return null
+
+  // 0 turns
+  if (canWalkStraightServer(board, a, b, rows, cols, a, b)) return [a, b]
+
+  // 1 turn: corner c1
+  const c1: Coord = { row: a.row, col: b.col }
+  if (isCellEmpty(board, c1.row, c1.col, rows, cols) &&
+    canWalkStraightServer(board, a, c1, rows, cols, a, b) &&
+    canWalkStraightServer(board, c1, b, rows, cols, a, b)) {
+    return [a, c1, b]
+  }
+
+  // 1 turn: corner c2
+  const c2: Coord = { row: b.row, col: a.col }
+  if (isCellEmpty(board, c2.row, c2.col, rows, cols) &&
+    canWalkStraightServer(board, a, c2, rows, cols, a, b) &&
+    canWalkStraightServer(board, c2, b, rows, cols, a, b)) {
+    return [a, c2, b]
+  }
+
+  // 2 turns: horizontal mid-lines
+  for (let r = -1; r <= rows; r++) {
+    const mid1: Coord = { row: r, col: a.col }
+    const mid2: Coord = { row: r, col: b.col }
+    const mid1Empty = (r === a.row) || isCellEmpty(board, r, a.col, rows, cols)
+    const mid2Empty = (r === b.row) || isCellEmpty(board, r, b.col, rows, cols)
+    if (mid1Empty && mid2Empty &&
+      canWalkStraightServer(board, a, mid1, rows, cols, a, b) &&
+      canWalkStraightServer(board, mid1, mid2, rows, cols, a, b) &&
+      canWalkStraightServer(board, mid2, b, rows, cols, a, b)) {
+      return [a, mid1, mid2, b]
+    }
+  }
+
+  // 2 turns: vertical mid-lines
+  for (let c = -1; c <= cols; c++) {
+    const mid1: Coord = { row: a.row, col: c }
+    const mid2: Coord = { row: b.row, col: c }
+    const mid1Empty = (c === a.col) || isCellEmpty(board, a.row, c, rows, cols)
+    const mid2Empty = (c === b.col) || isCellEmpty(board, b.row, c, rows, cols)
+    if (mid1Empty && mid2Empty &&
+      canWalkStraightServer(board, a, mid1, rows, cols, a, b) &&
+      canWalkStraightServer(board, mid1, mid2, rows, cols, a, b) &&
+      canWalkStraightServer(board, mid2, b, rows, cols, a, b)) {
+      return [a, mid1, mid2, b]
+    }
+  }
+
+  return null
+}
+
+function findAnyPairServer(board: Cell[][], rows: number, cols: number): [Coord, Coord] | null {
+  const cells: Coord[] = []
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      if (board[r]?.[c] !== null) cells.push({ row: r, col: c })
+    }
+  }
+
+  for (let i = 0; i < cells.length; i++) {
+    for (let j = i + 1; j < cells.length; j++) {
+      if (board[cells[i].row][cells[i].col] === board[cells[j].row][cells[j].col]) {
+        const path = findLinkPathServer(board, cells[i], cells[j], rows, cols)
+        if (path) return [cells[i], cells[j]]
+      }
+    }
+  }
+  return null
+}
+
+function shuffleBoardServer(board: Cell[][], rows: number, cols: number): Cell[][] {
+  const newBoard = board.map(row => [...row])
+  const remaining: number[] = []
+  const positions: Coord[] = []
+
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      if (newBoard[r]?.[c] !== null) {
+        remaining.push(newBoard[r][c]!)
+        positions.push({ row: r, col: c })
+      }
+    }
+  }
+
+  for (let i = remaining.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[remaining[i], remaining[j]] = [remaining[j], remaining[i]]
+  }
+
+  for (let i = 0; i < positions.length; i++) {
+    newBoard[positions[i].row][positions[i].col] = remaining[i]
+  }
+  return newBoard
+}
+
+export function ensureSolvableBoardServer(board: Cell[][], rows: number, cols: number): Cell[][] {
+  const remainingPositions: Coord[] = []
+  const valCount = new Map<number, number>()
+
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const v = board[r]?.[c]
+      if (v !== null && v !== undefined) {
+        remainingPositions.push({ row: r, col: c })
+        valCount.set(v, (valCount.get(v) || 0) + 1)
+      }
+    }
+  }
+
+  if (remainingPositions.length <= 1) return board
+
+  // 1. Sửa lỗi Parity (tính chẵn lẻ): Đảm bảo mọi Pokémon đều có số lượng chẵn (ít nhất 1 cặp)
+  let current = board.map(r => [...r])
+  const oddVals: number[] = []
+  for (const [val, count] of valCount.entries()) {
+    if (count % 2 !== 0) oddVals.push(val)
+  }
+
+  if (oddVals.length > 0) {
+    for (let i = 0; i + 1 < oddVals.length; i += 2) {
+      const vKeep = oddVals[i]
+      const vReplace = oddVals[i + 1]
+      for (const p of remainingPositions) {
+        if (current[p.row][p.col] === vReplace) {
+          current[p.row][p.col] = vKeep
+          break
+        }
+      }
+    }
+    if (oddVals.length % 2 !== 0) {
+      const loneVal = oddVals[oddVals.length - 1]
+      const mostCommon = Array.from(valCount.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] || 25
+      for (const p of remainingPositions) {
+        if (current[p.row][p.col] === loneVal) {
+          current[p.row][p.col] = mostCommon
+          break
+        }
+      }
+    }
+  }
+
+  // 2. Nếu bàn cờ hiện tại đã giải được ít nhất 1 cặp thì giữ nguyên
+  if (findAnyPairServer(current, rows, cols)) return current
+
+  // 3. Xáo trộn ngẫu nhiên tối đa 60 lần
+  for (let t = 0; t < 60; t++) {
+    current = shuffleBoardServer(current, rows, cols)
+    if (findAnyPairServer(current, rows, cols)) return current
+  }
+
+  // 4. Thuật toán tất định (Deterministic Solver):
+  const allVals = remainingPositions.map(p => current[p.row][p.col]!)
+  const counts = new Map<number, number>()
+  for (const v of allVals) counts.set(v, (counts.get(v) || 0) + 1)
+  let targetVal: number = allVals[0]
+  for (const [v, cnt] of counts.entries()) {
+    if (cnt >= 2) {
+      targetVal = v
+      break
+    }
+  }
+
+  let foundConnectablePair: [Coord, Coord] | null = null
+  const testBoard = current.map(r => [...r])
+
+  outerLoop:
+  for (let i = 0; i < remainingPositions.length; i++) {
+    const pA = remainingPositions[i]
+    for (let j = i + 1; j < remainingPositions.length; j++) {
+      const pB = remainingPositions[j]
+      const origA = testBoard[pA.row][pA.col]
+      const origB = testBoard[pB.row][pB.col]
+      testBoard[pA.row][pA.col] = -9999
+      testBoard[pB.row][pB.col] = -9999
+
+      const path = findLinkPathServer(testBoard, pA, pB, rows, cols)
+      testBoard[pA.row][pA.col] = origA
+      testBoard[pB.row][pB.col] = origB
+
+      if (path) {
+        foundConnectablePair = [pA, pB]
+        break outerLoop
+      }
+    }
+  }
+
+  if (foundConnectablePair) {
+    const [pA, pB] = foundConnectablePair
+    const otherVals: number[] = []
+    let removedCount = 0
+    for (const v of allVals) {
+      if (v === targetVal && removedCount < 2) {
+        removedCount++
+      } else {
+        otherVals.push(v)
+      }
+    }
+
+    current[pA.row][pA.col] = targetVal
+    current[pB.row][pB.col] = targetVal
+
+    let otherIdx = 0
+    for (const p of remainingPositions) {
+      if ((p.row === pA.row && p.col === pA.col) || (p.row === pB.row && p.col === pB.col)) {
+        continue
+      }
+      current[p.row][p.col] = otherVals[otherIdx++]
+    }
+
+    if (findAnyPairServer(current, rows, cols)) {
+      return current
+    }
+  }
+
+  // 5. Dự phòng khẩn cấp
+  if (remainingPositions.length >= 2) {
+    const p1 = remainingPositions[0]
+    const p2 = remainingPositions[1]
+    current[p1.row][p1.col] = targetVal
+    current[p2.row][p2.col] = targetVal
+  }
+
+  return current
+}
+
+// Helper to generate a random board with 100% guarantee of solvable pairs
 export function generateBoardData(sizeKey: GridSizeKey): Cell[][] {
   const { cols, rows } = GRID_DIMS[sizeKey] || GRID_DIMS['14x8']
   const totalCells = cols * rows
@@ -501,7 +758,7 @@ export function generateBoardData(sizeKey: GridSizeKey): Cell[][] {
   for (let r = 0; r < rows; r++) {
     board.push(flat.slice(r * cols, (r + 1) * cols))
   }
-  return board
+  return ensureSolvableBoardServer(board, rows, cols)
 }
 
 export function createRoom(
@@ -725,6 +982,10 @@ export function updatePlayerAction(
     }
   } else if (action.type === 'shuffle' && action.newBoard) {
     player.board = action.newBoard
+    if (room.mode === 'shared') {
+      room.sharedBoard = action.newBoard
+      if (opponent) opponent.board = action.newBoard
+    }
     if (typeof action.points === 'number' && action.points > 0) {
       player.score += action.points
     }

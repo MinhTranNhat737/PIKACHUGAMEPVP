@@ -7,9 +7,15 @@ import {
   getRankTier
 } from '@/lib/game-state'
 
+export const dynamic = 'force-dynamic'
+export const fetchCache = 'force-no-store'
+export const revalidate = 0
+
 const NOCACHE_HEADERS = {
-  'Cache-Control': 'no-store, no-cache, must-revalidate',
+  'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
   'Pragma': 'no-cache',
+  'Surrogate-Control': 'no-store',
+  'Vercel-CDN-Cache-Control': 'no-store',
 }
 
 export async function POST(req: Request) {
@@ -30,12 +36,12 @@ export async function POST(req: Request) {
         rankPoints: typeof rankPoints === 'number' ? rankPoints : 500,
       })
       const rankInfo = getRankTier(rankPoints || 500)
-      return NextResponse.json({ success: true, ...result, rankInfo }, { headers: NOCACHE_HEADERS })
+      return NextResponse.json({ ...result, rankInfo }, { headers: NOCACHE_HEADERS })
     }
 
     if (action === 'poll') {
       const result = pollMatchmaking(playerId)
-      return NextResponse.json({ success: true, ...result }, { headers: NOCACHE_HEADERS })
+      return NextResponse.json({ ...result }, { headers: NOCACHE_HEADERS })
     }
 
     if (action === 'cancel') {
@@ -57,7 +63,7 @@ export async function GET(req: Request) {
 
     if (action === 'poll' && playerId) {
       const result = pollMatchmaking(playerId)
-      return NextResponse.json({ success: true, ...result }, { headers: NOCACHE_HEADERS })
+      return NextResponse.json({ ...result }, { headers: NOCACHE_HEADERS })
     }
 
     if (action === 'cancel' && playerId) {

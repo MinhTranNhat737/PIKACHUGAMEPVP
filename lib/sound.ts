@@ -1,5 +1,67 @@
 // Retro Web Audio Sound Effects & 8-Bit Chiptune BGM for Pikachu Classic
 let audioCtx: AudioContext | null = null
+let hasAddedUnlockListeners = false
+let audioReadyListeners: Array<(ready: boolean) => void> = []
+
+export function subscribeAudioReady(listener: (ready: boolean) => void): () => void {
+  audioReadyListeners.push(listener)
+  if (typeof window !== 'undefined' && audioCtx) {
+    listener(audioCtx.state === 'running')
+  }
+  return () => {
+    audioReadyListeners = audioReadyListeners.filter(l => l !== listener)
+  }
+}
+
+function notifyAudioReady(ready: boolean) {
+  audioReadyListeners.forEach(l => {
+    try { l(ready) } catch {}
+  })
+}
+
+export function isAudioRunning(): boolean {
+  return !!audioCtx && audioCtx.state === 'running'
+}
+
+export function autoUnlockAudio(): Promise<boolean> {
+  const ctx = getAudioContext()
+  if (!ctx) return Promise.resolve(false)
+  if (ctx.state === 'running') {
+    notifyAudioReady(true)
+    if (isBgmPlaying && !bgmTimer) {
+      runBgmTick()
+    }
+    return Promise.resolve(true)
+  }
+  return ctx.resume().then(() => {
+    notifyAudioReady(ctx.state === 'running')
+    if (isBgmPlaying && !bgmTimer) {
+      runBgmTick()
+    }
+    return true
+  }).catch(() => false)
+}
+
+function setupUnlockListeners() {
+  if (typeof window === 'undefined' || hasAddedUnlockListeners) return
+  hasAddedUnlockListeners = true
+
+  const unlockHandler = () => {
+    autoUnlockAudio().then(unlocked => {
+      if (unlocked) {
+        window.removeEventListener('pointerdown', unlockHandler, true)
+        window.removeEventListener('touchstart', unlockHandler, true)
+        window.removeEventListener('keydown', unlockHandler, true)
+        window.removeEventListener('click', unlockHandler, true)
+      }
+    })
+  }
+
+  window.addEventListener('pointerdown', unlockHandler, { capture: true, passive: true })
+  window.addEventListener('touchstart', unlockHandler, { capture: true, passive: true })
+  window.addEventListener('keydown', unlockHandler, { capture: true, passive: true })
+  window.addEventListener('click', unlockHandler, { capture: true, passive: true })
+}
 
 function getAudioContext(): AudioContext | null {
   if (typeof window === 'undefined') return null
@@ -7,10 +69,22 @@ function getAudioContext(): AudioContext | null {
     const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext
     if (AudioContextClass) {
       audioCtx = new AudioContextClass()
+      audioCtx.onstatechange = () => {
+        if (audioCtx) {
+          const isRunning = audioCtx.state === 'running'
+          notifyAudioReady(isRunning)
+          if (isRunning && isBgmPlaying && !bgmTimer) {
+            runBgmTick()
+          }
+        }
+      }
     }
   }
+  setupUnlockListeners()
   if (audioCtx && audioCtx.state === 'suspended') {
-    audioCtx.resume().catch(() => {})
+    audioCtx.resume().then(() => {
+      notifyAudioReady(audioCtx?.state === 'running')
+    }).catch(() => {})
   }
   return audioCtx
 }
@@ -328,95 +402,150 @@ function getNoiseBuffer(ctx: AudioContext): AudioBuffer {
   return noiseBuffer
 }
 
-export const startBgm = () => {
-  if (isBgmPlaying) return
+let bgmStep = 0
+let bgmVolume = 0.22
+
+export function setBgmVolume(volume: number) {
+  bgmVolume = Math.max(0, Math.min(1, volume))
+  if (masterBgmGain && audioCtx) {
+    try {
+      masterBgmGain.gain.setValueAtTime(bgmVolume, audioCtx.currentTime)
+    } catch {}
+  }
+}
+
+export function runBgmTick() {
   const ctx = getAudioContext()
-  if (!ctx) return
-  isBgmPlaying = true
+  if (!ctx || !isBgmPlaying) return
+
+  // If still suspended, we will be called once resumed
+  if (ctx.state !== 'running') {
+    ctx.resume().catch(() => {})
+    return
+  }
+
+  if (bgmTimer) {
+    clearTimeout(bgmTimer)
+    bgmTimer = null
+  }
 
   if (!masterBgmGain) {
     masterBgmGain = ctx.createGain()
-    masterBgmGain.gain.setValueAtTime(0.25, ctx.currentTime)
+    masterBgmGain.gain.setValueAtTime(bgmVolume, ctx.currentTime)
     masterBgmGain.connect(ctx.destination)
+  } else {
+    try {
+      masterBgmGain.gain.setValueAtTime(bgmVolume, ctx.currentTime)
+    } catch {}
   }
 
   const stepTime = 0.135 // ~111 BPM 16th notes
-  let step = 0
 
   function tick() {
     if (!isBgmPlaying || !ctx || !masterBgmGain) return
+    if (ctx.state !== 'running') {
+      // AudioContext went suspended again; wait for resume
+      bgmTimer = setTimeout(tick, 200)
+      return
+    }
+
     const now = ctx.currentTime
 
     // 1. Lead Chiptune Square Wave
-    const melFreq = SEQ_MELODY[step % SEQ_MELODY.length]
+    const melFreq = SEQ_MELODY[bgmStep % SEQ_MELODY.length]
     if (melFreq > 0) {
-      const osc = ctx.createOscillator()
-      const gain = ctx.createGain()
-      osc.type = 'square'
-      osc.frequency.setValueAtTime(melFreq, now)
+      try {
+        const osc = ctx.createOscillator()
+        const gain = ctx.createGain()
+        osc.type = 'square'
+        osc.frequency.setValueAtTime(melFreq, now)
 
-      gain.gain.setValueAtTime(0.045, now)
-      gain.gain.exponentialRampToValueAtTime(0.001, now + stepTime * 1.3)
+        gain.gain.setValueAtTime(0.045, now)
+        gain.gain.exponentialRampToValueAtTime(0.001, now + stepTime * 1.3)
 
-      osc.connect(gain)
-      gain.connect(masterBgmGain)
-      osc.start(now)
-      osc.stop(now + stepTime * 1.35)
+        osc.connect(gain)
+        gain.connect(masterBgmGain)
+        osc.start(now)
+        osc.stop(now + stepTime * 1.35)
+      } catch {}
     }
 
     // 2. Retro Bass Triangle Wave
-    const bassFreq = SEQ_BASS[step % SEQ_BASS.length]
+    const bassFreq = SEQ_BASS[bgmStep % SEQ_BASS.length]
     if (bassFreq > 0) {
-      const bassOsc = ctx.createOscillator()
-      const bassGain = ctx.createGain()
-      bassOsc.type = 'triangle'
-      bassOsc.frequency.setValueAtTime(bassFreq, now)
+      try {
+        const bassOsc = ctx.createOscillator()
+        const bassGain = ctx.createGain()
+        bassOsc.type = 'triangle'
+        bassOsc.frequency.setValueAtTime(bassFreq, now)
 
-      bassGain.gain.setValueAtTime(0.07, now)
-      bassGain.gain.exponentialRampToValueAtTime(0.001, now + stepTime * 1.8)
+        bassGain.gain.setValueAtTime(0.07, now)
+        bassGain.gain.exponentialRampToValueAtTime(0.001, now + stepTime * 1.8)
 
-      bassOsc.connect(bassGain)
-      bassGain.connect(masterBgmGain)
-      bassOsc.start(now)
-      bassOsc.stop(now + stepTime * 1.85)
+        bassOsc.connect(bassGain)
+        bassGain.connect(masterBgmGain)
+        bassOsc.start(now)
+        bassOsc.stop(now + stepTime * 1.85)
+      } catch {}
     }
 
     // 3. 8-Bit GameBoy Noise Channel Percussion
-    const drumType = SEQ_DRUM[step % SEQ_DRUM.length]
+    const drumType = SEQ_DRUM[bgmStep % SEQ_DRUM.length]
     if (drumType > 0) {
-      const noiseSource = ctx.createBufferSource()
-      noiseSource.buffer = getNoiseBuffer(ctx)
+      try {
+        const noiseSource = ctx.createBufferSource()
+        noiseSource.buffer = getNoiseBuffer(ctx)
 
-      const filter = ctx.createBiquadFilter()
-      const drumGain = ctx.createGain()
+        const filter = ctx.createBiquadFilter()
+        const drumGain = ctx.createGain()
 
-      if (drumType === 1) {
-        // Hi-hat (High pass)
-        filter.type = 'highpass'
-        filter.frequency.setValueAtTime(6500, now)
-        drumGain.gain.setValueAtTime(0.02, now)
-        drumGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.035)
-      } else {
-        // Snare / pop (Band pass)
-        filter.type = 'bandpass'
-        filter.frequency.setValueAtTime(1400, now)
-        drumGain.gain.setValueAtTime(0.04, now)
-        drumGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.07)
-      }
+        if (drumType === 1) {
+          // Hi-hat (High pass)
+          filter.type = 'highpass'
+          filter.frequency.setValueAtTime(6500, now)
+          drumGain.gain.setValueAtTime(0.02, now)
+          drumGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.035)
+        } else {
+          // Snare / pop (Band pass)
+          filter.type = 'bandpass'
+          filter.frequency.setValueAtTime(1400, now)
+          drumGain.gain.setValueAtTime(0.04, now)
+          drumGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.07)
+        }
 
-      noiseSource.connect(filter)
-      filter.connect(drumGain)
-      drumGain.connect(masterBgmGain)
+        noiseSource.connect(filter)
+        filter.connect(drumGain)
+        drumGain.connect(masterBgmGain)
 
-      noiseSource.start(now)
-      noiseSource.stop(now + 0.08)
+        noiseSource.start(now)
+        noiseSource.stop(now + 0.08)
+      } catch {}
     }
 
-    step = (step + 1) % SEQ_MELODY.length
+    bgmStep = (bgmStep + 1) % SEQ_MELODY.length
     bgmTimer = setTimeout(tick, stepTime * 1000)
   }
 
   tick()
+}
+
+export const startBgm = () => {
+  isBgmPlaying = true
+  const ctx = getAudioContext()
+  if (!ctx) return
+
+  if (ctx.state === 'running') {
+    if (!bgmTimer) {
+      runBgmTick()
+    }
+  } else {
+    ctx.resume().then(() => {
+      notifyAudioReady(ctx.state === 'running')
+      if (isBgmPlaying && !bgmTimer) {
+        runBgmTick()
+      }
+    }).catch(() => {})
+  }
 }
 
 export const stopBgm = () => {
@@ -428,3 +557,4 @@ export const stopBgm = () => {
 }
 
 export const getIsBgmPlaying = () => isBgmPlaying
+

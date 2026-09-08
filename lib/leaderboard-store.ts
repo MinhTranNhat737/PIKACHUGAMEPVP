@@ -3,7 +3,8 @@ import path from 'path'
 import { LeaderboardEntry } from './game-state'
 
 function getLeaderboardFilePath(): string {
-  const dataDir = path.join(process.cwd(), 'data')
+  const isVercel = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME)
+  const dataDir = isVercel ? path.join('/tmp', 'data') : path.join(process.cwd(), 'data')
   if (!fs.existsSync(dataDir)) {
     try { fs.mkdirSync(dataDir, { recursive: true }) } catch {}
   }
@@ -13,8 +14,19 @@ function getLeaderboardFilePath(): string {
 export function loadLeaderboardFromFile(): LeaderboardEntry[] {
   try {
     const filePath = getLeaderboardFilePath()
+    let rawData: string | null = null
     if (fs.existsSync(filePath)) {
-      const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'))
+      rawData = fs.readFileSync(filePath, 'utf-8')
+    } else {
+      const seedPath = path.join(process.cwd(), 'data', 'leaderboard.json')
+      if (fs.existsSync(seedPath)) {
+        rawData = fs.readFileSync(seedPath, 'utf-8')
+        try { fs.writeFileSync(filePath, rawData, 'utf-8') } catch {}
+      }
+    }
+
+    if (rawData) {
+      const data = JSON.parse(rawData)
       if (Array.isArray(data)) return data
     }
   } catch {}

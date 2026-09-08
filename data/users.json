@@ -73,7 +73,7 @@
     },
     "createdAt": "2026-09-07T21:32:41.852Z",
     "lastLoginAt": "2026-09-07T21:32:41.852Z",
-    "lastLogin": 1788819543212,
+    "lastLogin": 1788871588060,
     "characterId": "paladin"
   },
   {
@@ -81,7 +81,7 @@
     "username": "minhlatoi2003",
     "passwordHash": "96cae35ce8a9b0244178bf28e4966c2ce1b8385723a96a6b838858cdd6ca0a1e",
     "displayName": "MInhdz",
-    "coins": 100,
+    "coins": 900,
     "botLevel": 1,
     "unlockedItems": [
       "theme-emerald",
@@ -96,9 +96,9 @@
       "lineEffect": "line-laser"
     },
     "createdAt": 1788816979300,
-    "lastLogin": 1788820114203,
+    "lastLogin": 1788872359835,
     "rankPoints": 0,
-    "characterId": "satoshi"
+    "characterId": "himeko"
   },
   {
     "id": "usr_1788820139907_1hge",

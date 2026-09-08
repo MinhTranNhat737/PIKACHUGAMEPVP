@@ -1,5 +1,325 @@
 [
   {
+    "id": "lb_1788872550512_s6i0",
+    "name": "MInhdz",
+    "score": 1270,
+    "mode": "Chơi Đơn",
+    "date": "20:02 08/09",
+    "createdAt": 1788872550512
+  },
+  {
+    "id": "lb_1788872550526_4mhk",
+    "name": "MInhdz",
+    "score": 1270,
+    "mode": "Chơi Đơn",
+    "date": "20:02 08/09",
+    "createdAt": 1788872550526
+  },
+  {
+    "id": "lb_1788872549845_lhr5",
+    "name": "MInhdz",
+    "score": 1215,
+    "mode": "Chơi Đơn",
+    "date": "20:02 08/09",
+    "createdAt": 1788872549845
+  },
+  {
+    "id": "lb_1788872549853_1z62",
+    "name": "MInhdz",
+    "score": 1215,
+    "mode": "Chơi Đơn",
+    "date": "20:02 08/09",
+    "createdAt": 1788872549853
+  },
+  {
+    "id": "lb_1788872549251_fso7",
+    "name": "MInhdz",
+    "score": 1165,
+    "mode": "Chơi Đơn",
+    "date": "20:02 08/09",
+    "createdAt": 1788872549251
+  },
+  {
+    "id": "lb_1788872549264_83h9",
+    "name": "MInhdz",
+    "score": 1165,
+    "mode": "Chơi Đơn",
+    "date": "20:02 08/09",
+    "createdAt": 1788872549264
+  },
+  {
+    "id": "lb_1788872548205_b3a6",
+    "name": "MInhdz",
+    "score": 1120,
+    "mode": "Chơi Đơn",
+    "date": "20:02 08/09",
+    "createdAt": 1788872548205
+  },
+  {
+    "id": "lb_1788872548215_89c1",
+    "name": "MInhdz",
+    "score": 1120,
+    "mode": "Chơi Đơn",
+    "date": "20:02 08/09",
+    "createdAt": 1788872548215
+  },
+  {
+    "id": "lb_1788872546428_e2fa",
+    "name": "MInhdz",
+    "score": 1080,
+    "mode": "Chơi Đơn",
+    "date": "20:02 08/09",
+    "createdAt": 1788872546428
+  },
+  {
+    "id": "lb_1788872546436_07ne",
+    "name": "MInhdz",
+    "score": 1080,
+    "mode": "Chơi Đơn",
+    "date": "20:02 08/09",
+    "createdAt": 1788872546436
+  },
+  {
+    "id": "lb_1788872544878_cfs4",
+    "name": "MInhdz",
+    "score": 1045,
+    "mode": "Chơi Đơn",
+    "date": "20:02 08/09",
+    "createdAt": 1788872544878
+  },
+  {
+    "id": "lb_1788872544886_y34e",
+    "name": "MInhdz",
+    "score": 1045,
+    "mode": "Chơi Đơn",
+    "date": "20:02 08/09",
+    "createdAt": 1788872544886
+  },
+  {
+    "id": "lb_1788872544016_1x60",
+    "name": "MInhdz",
+    "score": 1015,
+    "mode": "Chơi Đơn",
+    "date": "20:02 08/09",
+    "createdAt": 1788872544016
+  },
+  {
+    "id": "lb_1788872544031_mf2y",
+    "name": "MInhdz",
+    "score": 1015,
+    "mode": "Chơi Đơn",
+    "date": "20:02 08/09",
+    "createdAt": 1788872544031
+  },
+  {
+    "id": "lb_1788872543461_p6n6",
+    "name": "MInhdz",
+    "score": 990,
+    "mode": "Chơi Đơn",
+    "date": "20:02 08/09",
+    "createdAt": 1788872543461
+  },
+  {
+    "id": "lb_1788872543473_l46v",
+    "name": "MInhdz",
+    "score": 990,
+    "mode": "Chơi Đơn",
+    "date": "20:02 08/09",
+    "createdAt": 1788872543473
+  },
+  {
+    "id": "lb_1788872542898_2rxa",
+    "name": "MInhdz",
+    "score": 970,
+    "mode": "Chơi Đơn",
+    "date": "20:02 08/09",
+    "createdAt": 1788872542898
+  },
+  {
+    "id": "lb_1788872542908_n17l",
+    "name": "MInhdz",
+    "score": 970,
+    "mode": "Chơi Đơn",
+    "date": "20:02 08/09",
+    "createdAt": 1788872542908
+  },
+  {
+    "id": "lb_1788872540342_lw0b",
+    "name": "MInhdz",
+    "score": 960,
+    "mode": "Chơi Đơn",
+    "date": "20:02 08/09",
+    "createdAt": 1788872540342
+  },
+  {
+    "id": "lb_1788872540354_pn58",
+    "name": "MInhdz",
+    "score": 960,
+    "mode": "Chơi Đơn",
+    "date": "20:02 08/09",
+    "createdAt": 1788872540354
+  },
+  {
+    "id": "lb_1788872534052_jdro",
+    "name": "MInhdz",
+    "score": 925,
+    "mode": "Chơi Đơn",
+    "date": "20:02 08/09",
+    "createdAt": 1788872534052
+  },
+  {
+    "id": "lb_1788872534063_g9vt",
+    "name": "MInhdz",
+    "score": 925,
+    "mode": "Chơi Đơn",
+    "date": "20:02 08/09",
+    "createdAt": 1788872534063
+  },
+  {
+    "id": "lb_1788872532573_or5e",
+    "name": "MInhdz",
+    "score": 895,
+    "mode": "Chơi Đơn",
+    "date": "20:02 08/09",
+    "createdAt": 1788872532573
+  },
+  {
+    "id": "lb_1788872532580_g46k",
+    "name": "MInhdz",
+    "score": 895,
+    "mode": "Chơi Đơn",
+    "date": "20:02 08/09",
+    "createdAt": 1788872532580
+  },
+  {
+    "id": "lb_1788872531925_h8ku",
+    "name": "MInhdz",
+    "score": 870,
+    "mode": "Chơi Đơn",
+    "date": "20:02 08/09",
+    "createdAt": 1788872531925
+  },
+  {
+    "id": "lb_1788872531935_8z1u",
+    "name": "MInhdz",
+    "score": 870,
+    "mode": "Chơi Đơn",
+    "date": "20:02 08/09",
+    "createdAt": 1788872531935
+  },
+  {
+    "id": "lb_1788872529529_v5ml",
+    "name": "MInhdz",
+    "score": 850,
+    "mode": "Chơi Đơn",
+    "date": "20:02 08/09",
+    "createdAt": 1788872529529
+  },
+  {
+    "id": "lb_1788872529537_zc4g",
+    "name": "MInhdz",
+    "score": 850,
+    "mode": "Chơi Đơn",
+    "date": "20:02 08/09",
+    "createdAt": 1788872529537
+  },
+  {
+    "id": "lb_1788872521793_0zf7",
+    "name": "MInhdz",
+    "score": 840,
+    "mode": "Chơi Đơn",
+    "date": "20:02 08/09",
+    "createdAt": 1788872521793
+  },
+  {
+    "id": "lb_1788872521806_pymo",
+    "name": "MInhdz",
+    "score": 840,
+    "mode": "Chơi Đơn",
+    "date": "20:02 08/09",
+    "createdAt": 1788872521806
+  },
+  {
+    "id": "lb_1788872520972_vdxa",
+    "name": "MInhdz",
+    "score": 760,
+    "mode": "Chơi Đơn",
+    "date": "20:02 08/09",
+    "createdAt": 1788872520972
+  },
+  {
+    "id": "lb_1788872520984_oxt7",
+    "name": "MInhdz",
+    "score": 760,
+    "mode": "Chơi Đơn",
+    "date": "20:02 08/09",
+    "createdAt": 1788872520984
+  },
+  {
+    "id": "lb_1788872516077_783i",
+    "name": "MInhdz",
+    "score": 685,
+    "mode": "Chơi Đơn",
+    "date": "20:01 08/09",
+    "createdAt": 1788872516077
+  },
+  {
+    "id": "lb_1788872516084_oya9",
+    "name": "MInhdz",
+    "score": 685,
+    "mode": "Chơi Đơn",
+    "date": "20:01 08/09",
+    "createdAt": 1788872516084
+  },
+  {
+    "id": "lb_1788872512291_vtmq",
+    "name": "MInhdz",
+    "score": 615,
+    "mode": "Chơi Đơn",
+    "date": "20:01 08/09",
+    "createdAt": 1788872512291
+  },
+  {
+    "id": "lb_1788872512294_tw6z",
+    "name": "MInhdz",
+    "score": 615,
+    "mode": "Chơi Đơn",
+    "date": "20:01 08/09",
+    "createdAt": 1788872512294
+  },
+  {
+    "id": "lb_1788872505945_eksi",
+    "name": "MInhdz",
+    "score": 550,
+    "mode": "Chơi Đơn",
+    "date": "20:01 08/09",
+    "createdAt": 1788872505945
+  },
+  {
+    "id": "lb_1788872505960_v6g6",
+    "name": "MInhdz",
+    "score": 550,
+    "mode": "Chơi Đơn",
+    "date": "20:01 08/09",
+    "createdAt": 1788872505960
+  },
+  {
+    "id": "lb_1788872505193_6ifb",
+    "name": "MInhdz",
+    "score": 490,
+    "mode": "Chơi Đơn",
+    "date": "20:01 08/09",
+    "createdAt": 1788872505193
+  },
+  {
+    "id": "lb_1788872505205_3yoy",
+    "name": "MInhdz",
+    "score": 490,
+    "mode": "Chơi Đơn",
+    "date": "20:01 08/09",
+    "createdAt": 1788872505205
+  },
+  {
     "id": "lb_1788818416089_ph4z",
     "name": "MinhMaster",
     "score": 450,
@@ -8,27 +328,75 @@
     "createdAt": 1788818416089
   },
   {
-    "id": "lb_1788819418295_e3bi",
-    "name": "Trainer",
-    "score": 160,
+    "id": "lb_1788872502508_qrzu",
+    "name": "MInhdz",
+    "score": 435,
     "mode": "Chơi Đơn",
-    "date": "05:16 08/09",
-    "createdAt": 1788819418295
+    "date": "20:01 08/09",
+    "createdAt": 1788872502508
   },
   {
-    "id": "lb_1788819396741_srbr",
-    "name": "Trainer",
-    "score": 140,
+    "id": "lb_1788872502522_tj0n",
+    "name": "MInhdz",
+    "score": 435,
     "mode": "Chơi Đơn",
-    "date": "05:16 08/09",
-    "createdAt": 1788819396741
+    "date": "20:01 08/09",
+    "createdAt": 1788872502522
   },
   {
-    "id": "lb_1788819369184_gwrl",
-    "name": "Trainer",
-    "score": 130,
+    "id": "lb_1788872498853_9ahm",
+    "name": "MInhdz",
+    "score": 385,
     "mode": "Chơi Đơn",
-    "date": "05:16 08/09",
-    "createdAt": 1788819369184
+    "date": "20:01 08/09",
+    "createdAt": 1788872498853
+  },
+  {
+    "id": "lb_1788872498865_32gu",
+    "name": "MInhdz",
+    "score": 385,
+    "mode": "Chơi Đơn",
+    "date": "20:01 08/09",
+    "createdAt": 1788872498865
+  },
+  {
+    "id": "lb_1788870026706_nxrr",
+    "name": "MInhdz",
+    "score": 340,
+    "mode": "Chơi Đơn",
+    "date": "19:20 08/09",
+    "createdAt": 1788870026706
+  },
+  {
+    "id": "lb_1788870026711_vx5i",
+    "name": "MInhdz",
+    "score": 340,
+    "mode": "Chơi Đơn",
+    "date": "19:20 08/09",
+    "createdAt": 1788870026711
+  },
+  {
+    "id": "lb_1788870024146_6o0q",
+    "name": "MInhdz",
+    "score": 285,
+    "mode": "Chơi Đơn",
+    "date": "19:20 08/09",
+    "createdAt": 1788870024146
+  },
+  {
+    "id": "lb_1788870024150_89qq",
+    "name": "MInhdz",
+    "score": 285,
+    "mode": "Chơi Đơn",
+    "date": "19:20 08/09",
+    "createdAt": 1788870024150
+  },
+  {
+    "id": "lb_1788870019505_7b1y",
+    "name": "MInhdz",
+    "score": 235,
+    "mode": "Chơi Đơn",
+    "date": "19:20 08/09",
+    "createdAt": 1788870019505
   }
 ]
