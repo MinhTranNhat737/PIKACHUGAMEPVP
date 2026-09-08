@@ -4190,6 +4190,7 @@ export function MirrorRushGame() {
               <thead>
                 <tr>
                   <th>HẠNG</th>
+                  <th>AVATAR</th>
                   <th>NGƯỜI CHƠI</th>
                   <th>BẬC RANK</th>
                   <th>ĐIỂM RP</th>
@@ -4198,11 +4199,11 @@ export function MirrorRushGame() {
               </thead>
               <tbody>
                 {(rankedPlayers.length > 0 ? rankedPlayers.slice(0, 8) : [
-                  { rank: 1, displayName: 'DragonMaster', rankTier: { name: 'Thách Đấu', icon: '👑' }, rankPoints: 2450, rankWins: 55, rankLosses: 12 },
-                  { rank: 2, displayName: 'PikaPro_VN', rankTier: { name: 'Cao Thủ', icon: '💎' }, rankPoints: 2180, rankWins: 48, rankLosses: 15 },
-                  { rank: 3, displayName: 'ShadowStrike', rankTier: { name: 'Cao Thủ', icon: '💎' }, rankPoints: 2020, rankWins: 42, rankLosses: 16 },
-                  { rank: 4, displayName: 'KasumiWave', rankTier: { name: 'Kim Cương', icon: '🔷' }, rankPoints: 1890, rankWins: 38, rankLosses: 19 },
-                  { rank: 5, displayName: 'ElectroVolt', rankTier: { name: 'Kim Cương', icon: '🔷' }, rankPoints: 1750, rankWins: 35, rankLosses: 18 },
+                  { rank: 1, displayName: 'DragonMaster', rankTier: { name: 'Thách Đấu', icon: '👑' }, rankPoints: 2450, rankWins: 55, rankLosses: 12, charId: 'satoshi' },
+                  { rank: 2, displayName: 'PikaPro_VN', rankTier: { name: 'Cao Thủ', icon: '💎' }, rankPoints: 2180, rankWins: 48, rankLosses: 15, charId: 'madara' },
+                  { rank: 3, displayName: 'ShadowStrike', rankTier: { name: 'Cao Thủ', icon: '💎' }, rankPoints: 2020, rankWins: 42, rankLosses: 16, charId: 'himeko' },
+                  { rank: 4, displayName: 'KasumiWave', rankTier: { name: 'Kim Cương', icon: '🔷' }, rankPoints: 1890, rankWins: 38, rankLosses: 19, charId: 'satoshi' },
+                  { rank: 5, displayName: 'ElectroVolt', rankTier: { name: 'Kim Cương', icon: '🔷' }, rankPoints: 1750, rankWins: 35, rankLosses: 18, charId: 'madara' },
                 ]).map((item: any, idx: number) => {
                   const wins = item.rankWins || 0
                   const losses = item.rankLosses || 0
@@ -4214,6 +4215,17 @@ export function MirrorRushGame() {
                         <span className={`rank-number rank-${item.rank || idx + 1}`}>
                           {item.rank || idx + 1}
                         </span>
+                      </td>
+                      <td className="lb-avatar-cell">
+                        <div className="lb-avatar-rect">
+                          <CharacterAvatar
+                            characterId={item.charId || 'satoshi'}
+                            emotion="idle"
+                            size="sm"
+                            shape="rect"
+                            interactive={false}
+                          />
+                        </div>
                       </td>
                       <td>
                         <strong style={{ color: '#f8fafc' }}>{item.displayName || item.username}</strong>
@@ -5134,7 +5146,24 @@ export function MirrorRushGame() {
         </section>
       ) : (
         /* CHẾ ĐỘ RIÊNG BẢNG (2 Bảng Khác Nhau Ở 2 Bên Trái - Phải + Chiêu Thức) */
-        <section className="arena-pvp">
+        <section className="arena-pvp with-avatar-cols">
+          {/* Cột Avatar Bên Trái: Nhân vật BẠN */}
+          <div className="pvp-avatar-column">
+            <div className="pvp-avatar-card is-player">
+              <CharacterAvatar
+                characterId={selectedCharacterId}
+                emotion={playerEmotion}
+                size="sm"
+                shape="rect"
+                showSpeech={playerEmotion !== 'idle'}
+                useVideo={useVideoAvatar}
+              />
+            </div>
+            <span className="pvp-avatar-name">{playerName}</span>
+            <span className="pvp-avatar-score" style={{ color: '#facc15' }}>{score} đ</span>
+            <span className="pvp-avatar-label is-player">BẠN</span>
+          </div>
+
           {/* Cột Trái: Bảng của BẠN */}
           <div className={`board-frame ${isMeFrozen ? 'is-frozen' : ''} ${isMeFogged ? 'is-fogged' : ''} ${combo >= 2 ? 'combo-on-fire' : ''} ${equipped.boardTheme} ${equipped.boardFrame}`}>
             {isImmune && <div className="debuff-banner" style={{ background: 'rgba(56,189,248,0.25)', color: '#38bdf8', borderColor: '#38bdf8' }}>🛡️ HÀO QUANG BẤT HOẠI (MIỄN NHIỄM)</div>}
@@ -5364,6 +5393,23 @@ export function MirrorRushGame() {
                 spriteTheme={spriteTheme}
               />
             )}
+          </div>
+
+          {/* Cột Avatar Bên Phải: Nhân vật ĐỐI THỦ */}
+          <div className="pvp-avatar-column">
+            <div className="pvp-avatar-card is-rival">
+              <CharacterAvatar
+                characterId={rivalCharacterId}
+                emotion={rivalEmotion}
+                size="sm"
+                shape="rect"
+                showSpeech={rivalEmotion !== 'idle'}
+                useVideo={useVideoAvatar}
+              />
+            </div>
+            <span className="pvp-avatar-name">{rivalName || 'Chờ...'}</span>
+            <span className="pvp-avatar-score" style={{ color: '#f43f5e' }}>{rivalScore} đ</span>
+            <span className="pvp-avatar-label is-rival">ĐỐI THỦ</span>
           </div>
         </section>
       )}

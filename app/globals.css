@@ -5071,3 +5071,283 @@ select {
   height: 58px !important;
   box-shadow: 0 0 16px rgba(56, 189, 248, 0.45) !important;
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   LEADERBOARD TABLE — Aligned columns, avatar slot, premium feel
+   ═══════════════════════════════════════════════════════════════ */
+.leaderboard-table {
+  border-collapse: separate;
+  border-spacing: 0 4px;
+  table-layout: fixed;
+}
+
+.leaderboard-table thead th {
+  background: rgba(15, 23, 42, 0.95);
+  color: #94a3b8;
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 8px 10px;
+  text-align: left;
+  border-bottom: 2px solid rgba(56, 189, 248, 0.2);
+  white-space: nowrap;
+}
+
+.leaderboard-table thead th:first-child {
+  width: 50px;
+  text-align: center;
+  border-radius: 8px 0 0 8px;
+}
+
+.leaderboard-table thead th:nth-child(2) {
+  width: 52px;
+  text-align: center;
+}
+
+.leaderboard-table thead th:last-child {
+  border-radius: 0 8px 8px 0;
+}
+
+.leaderboard-table tbody tr {
+  background: rgba(15, 23, 42, 0.55);
+  transition: all 0.15s ease;
+}
+
+.leaderboard-table tbody tr:hover {
+  background: rgba(30, 48, 80, 0.7);
+  transform: scale(1.01);
+}
+
+.leaderboard-table tbody td {
+  padding: 8px 10px;
+  font-size: 13px;
+  vertical-align: middle;
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.leaderboard-table tbody td:first-child {
+  border-radius: 8px 0 0 8px;
+  border-left: 1px solid rgba(255, 255, 255, 0.04);
+  text-align: center;
+}
+
+.leaderboard-table tbody td:last-child {
+  border-radius: 0 8px 8px 0;
+  border-right: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+/* Avatar cell in leaderboard */
+.leaderboard-table td.lb-avatar-cell {
+  width: 52px;
+  text-align: center;
+  padding: 4px 6px;
+}
+
+.lb-avatar-rect {
+  width: 40px;
+  height: 52px;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 2px solid rgba(56, 189, 248, 0.3);
+  background: rgba(0, 0, 0, 0.4);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+.lb-avatar-rect .character-sprite-box {
+  width: 40px !important;
+  height: 52px !important;
+  border-radius: 6px !important;
+}
+
+/* Rank number badges */
+.rank-number {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  font-size: 13px;
+  font-weight: 900;
+  background: rgba(30, 48, 80, 0.7);
+  color: #94a3b8;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.rank-number.rank-1 {
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+  color: #0f172a;
+  border-color: #f59e0b;
+  box-shadow: 0 0 14px rgba(245, 158, 11, 0.5);
+}
+
+.rank-number.rank-2 {
+  background: linear-gradient(135deg, #94a3b8, #64748b);
+  color: #0f172a;
+  border-color: #94a3b8;
+  box-shadow: 0 0 10px rgba(148, 163, 184, 0.4);
+}
+
+.rank-number.rank-3 {
+  background: linear-gradient(135deg, #cd7f32, #b87333);
+  color: #0f172a;
+  border-color: #cd7f32;
+  box-shadow: 0 0 10px rgba(205, 127, 50, 0.4);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   PVP AVATAR SIDE COLUMNS — Dedicated rectangular avatar panels
+   ═══════════════════════════════════════════════════════════════ */
+.pvp-avatar-column {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 8px 4px;
+  min-width: 90px;
+  max-width: 110px;
+}
+
+.pvp-avatar-card {
+  position: relative;
+  width: 88px;
+  height: 120px;
+  border-radius: 14px;
+  overflow: hidden;
+  border: 2px solid rgba(56, 189, 248, 0.3);
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.9) 0%, rgba(8, 15, 30, 0.95) 100%);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5), 0 0 12px rgba(56, 189, 248, 0.15);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color 0.3s, box-shadow 0.3s;
+}
+
+.pvp-avatar-card.is-player {
+  border-color: rgba(250, 204, 21, 0.5);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5), 0 0 16px rgba(250, 204, 21, 0.2);
+}
+
+.pvp-avatar-card.is-rival {
+  border-color: rgba(244, 63, 94, 0.5);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5), 0 0 16px rgba(244, 63, 94, 0.2);
+}
+
+.pvp-avatar-card .character-sprite-box {
+  width: 84px !important;
+  height: 116px !important;
+  border-radius: 12px !important;
+}
+
+.pvp-avatar-name {
+  font-size: 11px;
+  font-weight: 800;
+  color: #f8fafc;
+  text-align: center;
+  max-width: 90px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  letter-spacing: 0.02em;
+}
+
+.pvp-avatar-score {
+  font-size: 14px;
+  font-weight: 900;
+  text-align: center;
+  letter-spacing: 0.04em;
+}
+
+.pvp-avatar-label {
+  font-size: 8px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  background: rgba(0, 0, 0, 0.5);
+  color: #94a3b8;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.pvp-avatar-label.is-player {
+  color: #facc15;
+  border-color: rgba(250, 204, 21, 0.3);
+  background: rgba(250, 204, 21, 0.1);
+}
+
+.pvp-avatar-label.is-rival {
+  color: #f43f5e;
+  border-color: rgba(244, 63, 94, 0.3);
+  background: rgba(244, 63, 94, 0.1);
+}
+
+/* Update arena-pvp grid for 5 columns: avatar | board | vs | board | avatar */
+.arena-pvp.with-avatar-cols {
+  grid-template-columns: 100px minmax(0, 1fr) 76px minmax(0, 1fr) 100px;
+}
+
+@media (max-width: 1100px) {
+  .arena-pvp.with-avatar-cols {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .pvp-avatar-column {
+    display: none;
+  }
+}
+
+@media (max-width: 768px) and (orientation: landscape) {
+  .arena-pvp.with-avatar-cols {
+    grid-template-columns: 70px 1fr 56px 1fr 70px !important;
+  }
+
+  .pvp-avatar-column {
+    display: flex;
+    min-width: 60px;
+    max-width: 70px;
+    padding: 4px 2px;
+  }
+
+  .pvp-avatar-card {
+    width: 56px;
+    height: 76px;
+    border-radius: 8px;
+  }
+
+  .pvp-avatar-card .character-sprite-box {
+    width: 52px !important;
+    height: 72px !important;
+    border-radius: 6px !important;
+  }
+
+  .pvp-avatar-name {
+    font-size: 8px;
+    max-width: 60px;
+  }
+
+  .pvp-avatar-score {
+    font-size: 11px;
+  }
+
+  .pvp-avatar-label {
+    font-size: 6px;
+    padding: 1px 5px;
+  }
+}
+
+@media (max-width: 480px) {
+  .pvp-avatar-column {
+    display: none !important;
+  }
+
+  .arena-pvp.with-avatar-cols {
+    grid-template-columns: 1fr 1fr !important;
+  }
+}
