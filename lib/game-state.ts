@@ -1102,6 +1102,23 @@ export function updatePlayerAction(
         message: `⚡ ${player.name} kích hoạt SẤM SÉT 10 VẠN VOLT: Tê liệt 3.5s, bẻ gãy Combo & triệt tiêu 35% năng lượng!`,
       }
     }
+  } else if (action.type === 'timeout') {
+    room.status = 'finished'
+    const guestScore = room.guest ? room.guest.score : 0
+    if (room.host.score > guestScore) {
+      room.winnerId = room.host.id
+    } else if (guestScore > room.host.score) {
+      room.winnerId = room.guest!.id
+    } else {
+      const guestPairs = room.guest ? room.guest.pairsCleared : 0
+      room.winnerId = room.host.pairsCleared >= guestPairs ? room.host.id : room.guest!.id
+    }
+    room.lastAction = {
+      playerId,
+      type: 'timeout',
+      timestamp: Date.now(),
+      message: `⏰ Hết thời gian! Người có điểm số cao hơn (${room.host.score} vs ${guestScore}) giành chiến thắng.`,
+    }
   } else if (action.type === 'restart') {
     const newBoard = generateBoardData(room.size)
     room.host.board = newBoard.map(r => [...r])

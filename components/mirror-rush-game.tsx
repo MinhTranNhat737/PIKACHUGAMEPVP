@@ -918,6 +918,13 @@ export function MirrorRushGame() {
   const wsRef = useRef<WebSocket | null>(null)
   const eventSourceRef = useRef<EventSource | null>(null)
   const [syncTransport, setSyncTransport] = useState<'ws' | 'sse' | 'poll'>('poll')
+  const boardRef = useRef<Cell[][]>(board)
+  boardRef.current = board
+  const scoreRef = useRef<number>(score)
+  scoreRef.current = score
+  const rivalScoreRef = useRef<number>(rivalScore)
+  rivalScoreRef.current = rivalScore
+  const sendRoomActionRef = useRef<(action: any) => void>(() => {})
 
   // Combo countdown timer (tự động hết hạn sau 4.5s không ăn bài)
   useEffect(() => {
@@ -1520,10 +1527,43 @@ export function MirrorRushGame() {
         }
         if (prev <= 1) {
           clearInterval(timer)
-          const isWin = score >= rivalScore
+
+          const curScore = scoreRef.current
+          const curRivalScore = rivalScoreRef.current
+          const curBoard = boardRef.current
+          const remainingTiles = curBoard.flat().filter(c => c !== null).length
+
+          let isWin = false
+          if (playMode === 'solo') {
+            // 1. Chơi đơn: chưa hoàn thành xong bảng thì thua luôn!
+            isWin = remainingTiles === 0
+            if (isWin) {
+              setNotice('🏆 XUẤT SẮC! BẠN ĐÃ HOÀN THÀNH BÀN ĐẤU VỪA KỊP GIỜ!')
+            } else {
+              setNotice(`⏰ HẾT THỜI GIAN! BẠN CÒN ${remainingTiles} QUÂN CHƯA NỐI XONG NÊN THUA CUỘC.`)
+            }
+          } else if (playMode === 'pvp-bot') {
+            // 2. Chơi với máy: nếu thua điểm máy thì thua cuộc! (Nếu điểm cao hơn thì chiến thắng)
+            isWin = curScore > curRivalScore
+            if (isWin) {
+              setNotice(`🏆 HẾT THỜI GIAN! BẠN CHIẾN THẮNG MÁY (${curScore} vs ${curRivalScore})!`)
+            } else {
+              setNotice(`🌧️ HẾT THỜI GIAN! BẠN ĐÃ THUA VÌ THẤP ĐIỂM HƠN MÁY (${curScore} vs ${curRivalScore})!`)
+            }
+          } else {
+            // 3. PvP 2 người: hết thời gian tính xem điểm ai cao hơn thì chiến thắng!
+            isWin = curScore > curRivalScore
+            sendRoomActionRef.current({ type: 'timeout' })
+            if (isWin) {
+              setNotice(`🏆 HẾT THỜI GIAN! BẠN CHIẾN THẮNG PVP VỚI ĐIỂM CAO HƠN (${curScore} vs ${curRivalScore})!`)
+            } else {
+              setNotice(`🌧️ HẾT THỜI GIAN! ĐỐI THỦ ĐÃ CHIẾN THẮNG VỚI ĐIỂM CAO HƠN (${curRivalScore} vs ${curScore})!`)
+            }
+          }
+
           setGameOver(isWin ? 'win' : 'lose')
           playSound(isWin ? 'win' : 'lose', soundEnabled)
-          submitScoreToLeaderboard(score)
+          submitScoreToLeaderboard(curScore)
           if (isWin) {
             handleGameWin()
           }
@@ -1533,7 +1573,7 @@ export function MirrorRushGame() {
       })
     }, 1000)
     return () => clearInterval(timer)
-  }, [inGame, gameOver, score, rivalScore, soundEnabled, submitScoreToLeaderboard, handleGameWin, timerFrozenUntil, playMode, rivalName])
+  }, [inGame, gameOver, soundEnabled, submitScoreToLeaderboard, handleGameWin, timerFrozenUntil, playMode, rivalName])
 
   // Bot AI behavior in 'pvp-bot'
   useEffect(() => {
@@ -1751,6 +1791,7 @@ export function MirrorRushGame() {
       })
       .catch(() => {})
   }, [playMode, roomCode, playerId, applyRoomData])
+  sendRoomActionRef.current = sendRoomAction
 
   useEffect(() => {
     if (!inGame || playMode !== 'pvp-online' || !roomCode) return
@@ -5617,8 +5658,14 @@ export function MirrorRushGame() {
             </div>
             <p style={{ color: '#94a3b8', fontSize: '13px', margin: '6px 0 14px' }}>
               {gameOver === 'win'
-                ? `Chúc mừng bạn đã xuất sắc chiến thắng ván cờ với ${score} điểm!`
-                : `Đối thủ đã hoàn thành trước hoặc thời gian thi đấu đã hết. Đừng nản lòng nhé!`}
+                ? (playMode === 'solo'
+                    ? `Chúc mừng bạn đã xuất sắc hoàn thành bản đồ ván cờ với ${score} điểm!`
+                    : `Chúc mừng bạn đã xuất sắc giành chiến thắng với ${score} điểm (đối thủ: ${rivalScore} điểm)!`)
+                : (playMode === 'solo'
+                    ? `Hết thời gian mà bạn chưa hoàn thành xong bảng cờ (${score} điểm). Đừng nản lòng nhé!`
+                    : playMode === 'pvp-bot'
+                    ? `Bạn đã thua cuộc trước ${curBot.name} do thấp điểm hơn (${score} vs ${rivalScore} điểm). Hãy cố gắng ở trận sau!`
+                    : `Đối thủ đã chiến thắng với điểm số cao hơn (${rivalScore} vs ${score} điểm). Hãy phục thù ở ván tiếp theo!`)}
             </p>
             <div style={{ display: 'flex', gap: '12px' }}>
               <button className="modal-btn-primary" onClick={onRestart}>CHƠI LẠI</button>
