@@ -1721,7 +1721,7 @@ export function MirrorRushGame() {
     if (playMode !== 'pvp-online' || !roomCode) return
 
     // 1. Gửi tức thì qua WebSocket nếu kết nối đang mở (< 1ms)
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+    if (wsRef.current && wsRef.current.readyState === 1) {
       try {
         wsRef.current.send(JSON.stringify({
           type: 'action',
@@ -1753,70 +1753,74 @@ export function MirrorRushGame() {
     let isCleanedUp = false
 
     // 1. WEBSOCKET REAL-TIME TRANSPORT (Port 3001)
-    try {
-      const wsProtocol = typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-      const wsHost = typeof window !== 'undefined' ? (window.location.hostname || 'localhost') : 'localhost'
-      const ws = new WebSocket(`${wsProtocol}//${wsHost}:3001`)
-      wsRef.current = ws
+    if (typeof window !== 'undefined' && typeof WebSocket !== 'undefined') {
+      try {
+        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+        const wsHost = window.location.hostname || 'localhost'
+        const ws = new WebSocket(`${wsProtocol}//${wsHost}:3001`)
+        wsRef.current = ws
 
-      ws.onopen = () => {
-        if (isCleanedUp) return ws.close()
-        setSyncTransport('ws')
-        ws.send(JSON.stringify({
-          type: 'join',
-          roomCode,
-          playerId,
-          playerName,
-        }))
-      }
+        ws.onopen = () => {
+          if (isCleanedUp) return ws.close()
+          setSyncTransport('ws')
+          ws.send(JSON.stringify({
+            type: 'join',
+            roomCode,
+            playerId,
+            playerName,
+          }))
+        }
 
-      ws.onmessage = (event) => {
-        try {
-          const msg = JSON.parse(event.data)
-          if (msg.type === 'room_action') {
-            // Nhận hành động tức thì từ đối thủ qua WebSocket (< 1ms)!
-            fetch(`/api/rooms/${roomCode}?since=0`, { cache: 'no-store' })
-              .then(res => res.json())
-              .then(data => {
-                if (data.success && data.room) {
-                  applyRoomData(data.room)
-                }
-              })
-              .catch(() => {})
-          }
-        } catch {}
-      }
+        ws.onmessage = (event) => {
+          try {
+            const msg = JSON.parse(event.data)
+            if (msg.type === 'room_action') {
+              // Nhận hành động tức thì từ đối thủ qua WebSocket (< 1ms)!
+              fetch(`/api/rooms/${roomCode}?since=0`, { cache: 'no-store' })
+                .then(res => res.json())
+                .then(data => {
+                  if (data.success && data.room) {
+                    applyRoomData(data.room)
+                  }
+                })
+                .catch(() => {})
+            }
+          } catch {}
+        }
 
-      ws.onerror = () => {
-        // WebSocket server không chạy ở port 3001 -> tự động fallback sang SSE
-      }
-    } catch {}
+        ws.onerror = () => {
+          // WebSocket server không chạy ở port 3001 -> tự động fallback sang SSE
+        }
+      } catch {}
+    }
 
     // 2. SERVER-SENT EVENTS (SSE) STREAM (Cổng 3000 chuẩn Next.js, độ trễ < 5ms)
-    try {
-      const eventSource = new EventSource(`/api/rooms/${roomCode}/stream`)
-      eventSourceRef.current = eventSource
+    if (typeof window !== 'undefined' && typeof EventSource !== 'undefined') {
+      try {
+        const eventSource = new EventSource(`/api/rooms/${roomCode}/stream`)
+        eventSourceRef.current = eventSource
 
-      eventSource.onopen = () => {
-        if (isCleanedUp) return eventSource.close()
-        setSyncTransport(prev => prev === 'ws' ? 'ws' : 'sse')
-      }
+        eventSource.onopen = () => {
+          if (isCleanedUp) return eventSource.close()
+          setSyncTransport(prev => prev === 'ws' ? 'ws' : 'sse')
+        }
 
-      eventSource.onmessage = (event) => {
-        try {
-          const room = JSON.parse(event.data)
-          if (room && room.code) {
-            setSyncTransport(prev => prev === 'ws' ? 'ws' : 'sse')
-            applyRoomData(room)
-          }
-        } catch {}
-      }
+        eventSource.onmessage = (event) => {
+          try {
+            const room = JSON.parse(event.data)
+            if (room && room.code) {
+              setSyncTransport(prev => prev === 'ws' ? 'ws' : 'sse')
+              applyRoomData(room)
+            }
+          } catch {}
+        }
 
-      eventSource.onerror = () => {
-        // SSE đứt kết nối -> fallback sang polling 140ms
-        setSyncTransport(prev => prev === 'ws' ? 'ws' : 'poll')
-      }
-    } catch {}
+        eventSource.onerror = () => {
+          // SSE đứt kết nối -> fallback sang polling 140ms
+          setSyncTransport(prev => prev === 'ws' ? 'ws' : 'poll')
+        }
+      } catch {}
+    }
 
     // 3. ADAPTIVE FAST POLLING (Lưới an toàn dự phòng tuyệt đối 140ms)
     let currentInterval = 140
