@@ -374,7 +374,7 @@ const BoardView = React.memo(function BoardView({
   board, cols, rows, selected, onSelect, linkPath, hintPair, matchingPair = null, isRival = false, spriteTheme = 'artwork',
   tileStyle = 'tile-classic', lineEffect = 'line-laser',
   isScrambling = false, shockwaves = [], matchParticles = [], floatingPopups = [],
-  activeSkillZaps = [], wildcardCoords = []
+  activeSkillZaps = [], wildcardCoords = [], solarFireCoords = [], electroCoreCoords = []
 }: {
   board: Cell[][]
   cols: number
@@ -394,6 +394,8 @@ const BoardView = React.memo(function BoardView({
   floatingPopups?: Array<{ id: string; x: number; y: number; text: string; color: string }>
   activeSkillZaps?: ElementalZap[]
   wildcardCoords?: string[]
+  solarFireCoords?: string[]
+  electroCoreCoords?: string[]
 }) {
   // SVG laser line mapping: nối chính xác từ tâm ô vuông (col + 0.5) / cols
   const svgCoords = useMemo(() => {
@@ -431,6 +433,8 @@ const BoardView = React.memo(function BoardView({
               const isEmptyCell = cell === null
               const activeZap = !isEmptyCell ? (activeSkillZaps || []).find(z => z.row === r && z.col === c) : null
               const isWildcard = !isEmptyCell && (wildcardCoords || []).includes(`${r}-${c}`)
+              const isSolarFire = !isEmptyCell && (solarFireCoords || []).includes(`${r}-${c}`)
+              const isElectroCore = !isEmptyCell && (electroCoreCoords || []).includes(`${r}-${c}`)
 
               return (
                 <div
@@ -443,6 +447,8 @@ const BoardView = React.memo(function BoardView({
                     isHint ? 'hinted' : '',
                     isMatching ? 'tile-matching' : '',
                     isWildcard ? 'tile-is-wildcard' : '',
+                    isSolarFire ? 'tile-is-solar-fire' : '',
+                    isElectroCore ? 'tile-is-electro-core' : '',
                     activeZap ? `elemental-zap elemental-zap-${activeZap.element}` : '',
                   ].filter(Boolean).join(' ')}
                   onClick={() => !isRival && !isMatching && onSelect && onSelect({ row: r, col: c })}
@@ -456,12 +462,22 @@ const BoardView = React.memo(function BoardView({
                       loading="eager"
                     />
                   )}
-                  {isWildcard && (
+                  {isSolarFire && (
+                    <div className="zap-element-badge" style={{ background: 'linear-gradient(135deg, #f97316, #ef4444)', color: '#ffffff', boxShadow: '0 0 10px rgba(249, 115, 22, 0.9)', fontWeight: 900 }}>
+                      🔥 +80đ
+                    </div>
+                  )}
+                  {isElectroCore && !isSolarFire && (
+                    <div className="zap-element-badge" style={{ background: 'linear-gradient(135deg, #facc15, #eab308)', color: '#713f12', boxShadow: '0 0 10px rgba(250, 204, 21, 0.9)', fontWeight: 900 }}>
+                      ⚡ +50đ
+                    </div>
+                  )}
+                  {isWildcard && !isSolarFire && !isElectroCore && (
                     <div className="zap-element-badge" style={{ background: '#facc15', color: '#713f12', boxShadow: '0 0 8px #facc15', fontWeight: 900 }}>
                       ⚡ JOKER
                     </div>
                   )}
-                  {activeZap && !isWildcard && (
+                  {activeZap && !isWildcard && !isSolarFire && !isElectroCore && (
                     <div className="zap-element-badge">
                       {activeZap.badge}
                     </div>
@@ -799,6 +815,8 @@ export function MirrorRushGame() {
   const [thunderRadarUntil, setThunderRadarUntil] = useState<number>(0)
   const [solarOverdriveUntil, setSolarOverdriveUntil] = useState<number>(0)
   const [wildcardCoords, setWildcardCoords] = useState<string[]>([])
+  const [solarFireCoords, setSolarFireCoords] = useState<string[]>([])
+  const [electroCoreCoords, setElectroCoreCoords] = useState<string[]>([])
   const [activeLaserCross, setActiveLaserCross] = useState<{ row: number; col: number } | null>(null)
 
   // Debuff states
@@ -1418,6 +1436,8 @@ export function MirrorRushGame() {
     setDoubleScoreTurnsLeft(0)
     setImmunityUntil(0)
     setTimerFrozenUntil(0)
+    setSolarFireCoords([])
+    setElectroCoreCoords([])
     setNotice('CHÀO MỪNG ĐẾN VỚI PIKACHU CLASSIC!')
   }, [])
 
@@ -1465,6 +1485,8 @@ export function MirrorRushGame() {
     setFogUntil(0)
     setRivalFrozenUntil(0)
     setRivalFogUntil(0)
+    setSolarFireCoords([])
+    setElectroCoreCoords([])
     setUltimateCutin(null)
     setDoubleScoreTurnsLeft(0)
     setImmunityUntil(0)
@@ -1608,6 +1630,7 @@ export function MirrorRushGame() {
 
   // Online multiplayer sync — Ultra-low latency polling (200ms) with since-param optimization
   const lastSyncUpdatedAtRef = useRef<number>(0)
+  const lastUltimateTimestampRef = useRef<number>(0)
 
   const applyRoomData = useCallback((room: RoomState) => {
     if (!room) return
@@ -1632,10 +1655,13 @@ export function MirrorRushGame() {
     }
 
     if (me) {
-      setScore(prev => Math.max(prev, me.score))
-      setEnergy(prev => Math.max(prev, me.energy))
+      setScore(me.score)
+      setEnergy(me.energy)
       setFrozenUntil(me.frozenUntil)
       setFogUntil(me.fogUntil)
+      if (me.immunityUntil) {
+        setImmunityUntil(me.immunityUntil)
+      }
     }
 
     if (opp) {
@@ -1650,6 +1676,28 @@ export function MirrorRushGame() {
 
     if (room.lastAction?.message) {
       setNotice(room.lastAction.message)
+    }
+
+    // Xử lý hiệu ứng khi đối thủ tung Tuyệt Kỹ trong trận PVP Online
+    if (room.lastAction?.type === 'ultimate' && room.lastAction.playerId !== playerId) {
+      if (room.lastAction.timestamp > lastUltimateTimestampRef.current) {
+        lastUltimateTimestampRef.current = room.lastAction.timestamp
+        const charId = room.lastAction.charId || 'satoshi'
+        triggerPlayerEmotion('sad', 2400)
+        if (charId === 'himeko') {
+          playSound('astral', soundEnabled)
+          const midR = Math.floor(dims.rows / 2)
+          const midC = Math.floor(dims.cols / 2)
+          setActiveLaserCross({ row: midR, col: midC })
+          setTimeout(() => setActiveLaserCross(null), 850)
+        } else if (charId === 'madara' || charId === 'maldara') {
+          playSound('slash', soundEnabled)
+          setShockwaves(prev => [...prev, { id: `sw_opp_madara_${Date.now()}`, x: 50, y: 50 }])
+        } else if (charId === 'satoshi') {
+          playSound('thunder', soundEnabled)
+          setCombo(0)
+        }
+      }
     }
 
     if (room.status === 'finished') {
@@ -1667,7 +1715,7 @@ export function MirrorRushGame() {
         return prev
       })
     }
-  }, [playerId, isHost, soundEnabled, handleGameWin])
+  }, [playerId, isHost, soundEnabled, handleGameWin, triggerPlayerEmotion, dims.rows, dims.cols])
 
   const sendRoomAction = useCallback((action: any) => {
     if (playMode !== 'pvp-online' || !roomCode) return
@@ -2019,6 +2067,14 @@ export function MirrorRushGame() {
     playSound('match', soundEnabled)
 
     const isSolar = solarOverdriveUntil > Date.now()
+    const isPrevSolarFire = solarFireCoords.includes(`${prevCoord.row}-${prevCoord.col}`)
+    const isCurSolarFire = solarFireCoords.includes(`${coord.row}-${coord.col}`)
+    const hasSolarFire = isPrevSolarFire || isCurSolarFire
+
+    const isPrevElectro = electroCoreCoords.includes(`${prevCoord.row}-${prevCoord.col}`)
+    const isCurElectro = electroCoreCoords.includes(`${coord.row}-${coord.col}`)
+    const hasElectro = isPrevElectro || isCurElectro
+
     const newCombo = combo + 1
     let addedPoints = 10 + (newCombo > 1 ? newCombo * 5 : 0)
     if (doubleScoreTurnsLeft > 0) {
@@ -2028,6 +2084,12 @@ export function MirrorRushGame() {
     if (isSolar) {
       addedPoints *= 3
       setTimeLeft(t => Math.min(DEFAULT_TIME, t + 2))
+    }
+    if (hasSolarFire) {
+      addedPoints += 80
+    }
+    if (hasElectro) {
+      addedPoints += 50
     }
 
     // Visual FX: Shockwaves & Particles
@@ -2067,6 +2129,8 @@ export function MirrorRushGame() {
       setLinkPath(null)
       setMatchingPair(null)
       setWildcardCoords(prev => prev.filter(c => c !== `${prevCoord.row}-${prevCoord.col}` && c !== `${coord.row}-${coord.col}`))
+      setSolarFireCoords(prev => prev.filter(c => c !== `${prevCoord.row}-${prevCoord.col}` && c !== `${coord.row}-${coord.col}`))
+      setElectroCoreCoords(prev => prev.filter(c => c !== `${prevCoord.row}-${prevCoord.col}` && c !== `${coord.row}-${coord.col}`))
 
       // Remove the 2 icons immediately on local board (applies to solo, bot, and pvp-online!)
       setBoard(cur => {
@@ -2127,6 +2191,24 @@ export function MirrorRushGame() {
       const popups: Array<{ id: string; x: number; y: number; text: string; color: string }> = [
         { id: `fp_${Date.now()}_pts`, x: midX, y: midY, text: `+${addedPoints} ✨`, color: '#fef08a' }
       ]
+      if (hasSolarFire) {
+        popups.push({
+          id: `fp_${Date.now()}_solar`,
+          x: midX,
+          y: Math.max(5, midY - 20),
+          text: `HẠT NHÂN LỬA +80đ! 🔥`,
+          color: '#fb923c',
+        })
+      }
+      if (hasElectro) {
+        popups.push({
+          id: `fp_${Date.now()}_electro`,
+          x: midX,
+          y: Math.max(5, midY - 20),
+          text: `SẤM SÉT HOÀNG KIM +50đ! ⚡`,
+          color: '#facc15',
+        })
+      }
       if (newCombo > 1) {
         popups.push({
           id: `fp_${Date.now()}_combo`,
@@ -2227,7 +2309,7 @@ export function MirrorRushGame() {
     }
   }
 
-  /* ─── Chiêu Thức Cuối (Ultimate Skills) Cho Từng Nhân Vật ─── */
+  /* ─── Chiêu Thức Cuối (Ultimate Skills) Cho Từng Nhân Vật (Đặc Trưng Riêng Biệt, Tuyệt Đối Không Trùng Lặp Xóa Cặp) ─── */
   const triggerUltimateSkill = useCallback(() => {
     if (gameOver) return
     setSelected(null)
@@ -2258,79 +2340,17 @@ export function MirrorRushGame() {
       setUltimateCutin(null)
     }, 1500)
 
-    // Hàm bổ trợ kích hoạt hiệu ứng giật tan biến theo nguyên tố trên bảng
-    const applyElementalZap = (
-      pairs: [Coord, Coord][],
-      element: ElementalZap['element'],
-      badge: string,
-      newBoard: Cell[][],
-      points: number,
-      onComplete?: () => void
-    ) => {
-      if (pairs.length === 0) return
-      const zaps: ElementalZap[] = []
-      pairs.forEach((pair, pIdx) => {
-        zaps.push({ id: `zap_${pIdx}_0_${Date.now()}`, row: pair[0].row, col: pair[0].col, element, badge })
-        zaps.push({ id: `zap_${pIdx}_1_${Date.now()}`, row: pair[1].row, col: pair[1].col, element, badge })
-      })
-      setActiveSkillZaps(zaps)
-
-      // Tính toán tia chùm / sét phóng từ Avatar xuống thẳng các icon mục tiêu
-      const avatarEl = document.getElementById('player-active-avatar')
-      const avatarRect = avatarEl?.getBoundingClientRect()
-      const startX = avatarRect ? avatarRect.left + avatarRect.width / 2 : window.innerWidth * 0.15
-      const startY = avatarRect ? avatarRect.top + avatarRect.height / 2 : 120
-
-      const beams: AvatarSkillBeam[] = []
-      pairs.forEach((pair, pIdx) => {
-        [pair[0], pair[1]].forEach((c, cIdx) => {
-          const tileEl = document.getElementById(`board-tile-${c.row}-${c.col}`)
-          const tileRect = tileEl?.getBoundingClientRect()
-          const targetX = tileRect ? tileRect.left + tileRect.width / 2 : window.innerWidth * 0.5
-          const targetY = tileRect ? tileRect.top + tileRect.height / 2 : window.innerHeight * 0.5
-          beams.push({
-            id: `beam_${pIdx}_${cIdx}_${Date.now()}`,
-            startX,
-            startY,
-            targetX,
-            targetY,
-            element,
-            badge,
-          })
-        })
-      })
-
-      setAvatarBeams(beams)
-      setTimeout(() => {
-        setAvatarBeams([])
-      }, 550)
-
-      setTimeout(() => {
-        const solvable = ensureSolvableBoard(newBoard, dims.rows, dims.cols)
-        setBoard(solvable)
-        setScore(s => s + points)
-        setActiveSkillZaps([])
-        if (playMode === 'pvp-online' && roomCode) {
-          sendRoomAction({
-            type: 'shuffle',
-            newBoard: solvable,
-            points,
-          })
-        }
-        if (onComplete) onComplete()
-      }, 500)
-    }
-
     // Thực thi hiệu ứng độc nhất vô nhị của từng nhân vật (Satoshi, Madara, Himeko)
     switch (curChar.id) {
       case 'satoshi': {
-        // ⚡ Radar Hoàng Kim + 4 Ô Sấm Sét Joker (Wildcard) + Tặng 15 Gợi ý & 3 Đổi Bài
+        // ⚡ Radar Sấm Sét Hoàng Kim 10s + Tặng 15 Gợi ý & 3 Đổi Bài + 4 Hạt Nhân Sấm Sét (+50đ)
+        // PVP ĐẶC BIỆT: Tê liệt 3.5s + Bẻ gãy Combo về 0 + Triệt tiêu 35% năng lượng đối thủ!
         playSound('thunder', soundEnabled)
-        setThunderRadarUntil(Date.now() + 8000)
+        setThunderRadarUntil(Date.now() + 10000)
         setHintsLeft(h => h + 15)
         setShufflesLeft(s => s + 3)
 
-        // Chọn 4 ô bất kỳ trên bảng và biến thành Ô Sấm Sét Wildcard (Joker)
+        // Chọn 4 ô bất kỳ trên bảng và biến thành Hạt Nhân Sấm Sét (+50đ khi ăn)
         const nonNullCoords: Coord[] = []
         for (let r = 0; r < dims.rows; r++) {
           for (let c = 0; c < dims.cols; c++) {
@@ -2338,8 +2358,8 @@ export function MirrorRushGame() {
           }
         }
         const shuffled = [...nonNullCoords].sort(() => Math.random() - 0.5).slice(0, 4)
-        const newWildcards = shuffled.map(c => `${c.row}-${c.col}`)
-        setWildcardCoords(prev => Array.from(new Set([...prev, ...newWildcards])))
+        const newCores = shuffled.map(c => `${c.row}-${c.col}`)
+        setElectroCoreCoords(prev => Array.from(new Set([...prev, ...newCores])))
 
         // Tia chớp nối từ avatar đến 4 ô biến đổi
         const avatarEl = document.getElementById('player-active-avatar')
@@ -2362,20 +2382,27 @@ export function MirrorRushGame() {
         setAvatarBeams(beams)
         setTimeout(() => setAvatarBeams([]), 650)
 
-        setNotice('⚡ RADAR SẤM SÉT & JOKER HOÀNG KIM! Đã mở Radar chỉ đường 8s, biến 4 ô thành Joker Wildcard (+15 Gợi ý)!')
-        if (playMode !== 'solo') {
-          setRivalFrozenUntil(Date.now() + 3000)
+        // PVP Mechanics
+        if (playMode === 'pvp-bot') {
+          setRivalFrozenUntil(Date.now() + 3500)
+          setNotice('⚡ SẤM SÉT 10 VẠN VOLT & RADAR HOÀNG KIM! Mở Radar 10s (+15 Gợi ý, +3 Đổi bài), Tê liệt Bot 3.5s & bẻ gãy Combo!')
+        } else if (playMode === 'pvp-online' && roomCode) {
+          sendRoomAction({ type: 'ultimate', charId: 'satoshi' })
+          setNotice('⚡ SẤM SÉT 10 VẠN VOLT! Radar 10s (+15 Gợi ý), Tê liệt 3.5s, Bẻ gãy Combo & Triệt tiêu 35% năng lượng đối thủ!')
+        } else {
+          setNotice('⚡ RADAR SẤM SÉT HOÀNG KIM! Mở Radar 10s, tạo 4 Hạt Nhân Sấm Sét (+50đ) & Tặng +15 Gợi ý, +3 Đổi bài!')
         }
         break
       }
       case 'madara':
       case 'maldara': {
-        // ☄️ Ảo Thuật Tsukuyomi + Ngưng Đọng Thời Gian 7s + Trọng Lực Susanoo dồn cờ + Khiên Bất Diệt 15s
+        // ☄️ Trọng Lực Susanoo (Dồn cờ xuống đáy) + Ngưng Đọng Thời Gian 8s + Khiên Hào Quang 15s
+        // PVP ĐẶC BIỆT: Phong ấn Tsukuyomi đóng băng 4.5s & đảo tung toàn bộ bảng đối thủ!
         playSound('slash', soundEnabled)
-        setTimerFrozenUntil(Date.now() + 7000)
+        setTimerFrozenUntil(Date.now() + 8000)
         setImmunityUntil(Date.now() + 15000)
 
-        // Dồn cờ xuống đáy (Gravity Fall)
+        // Dồn cờ xuống đáy (Gravity Fall) - Bảo toàn 100% quân cờ, không xóa ô nào
         const newBoard = board.map(row => [...row])
         for (let c = 0; c < dims.cols; c++) {
           const colCells: Cell[] = []
@@ -2390,65 +2417,81 @@ export function MirrorRushGame() {
         }
         const solvableBoard = ensureSolvableBoard(newBoard, dims.rows, dims.cols)
         setBoard(solvableBoard)
-        if (playMode === 'pvp-online' && roomCode) {
-          sendRoomAction({ type: 'shuffle', newBoard: solvableBoard })
-        }
 
-        // Tạo hiệu ứng sóng chấn Susanoo
+        // Sóng chấn Susanoo
         const swId = `sw_susanoo_${Date.now()}`
         setShockwaves(prev => [...prev, { id: swId, x: 50, y: 50 }])
 
-        setNotice('☄️ ẢO THUẬT TSUKUYOMI & SUSANOO! Ngưng đọng thời gian 7s, Trọng lực dồn toàn bộ cờ xuống đáy & Bật Khiên Susanoo 15s!')
-        if (playMode !== 'solo') {
-          setRivalFrozenUntil(Date.now() + 4000) // Đóng băng bảng đối thủ 4s!
-          setRivalFogUntil(Date.now() + 4500)
+        // PVP Mechanics
+        if (playMode === 'pvp-bot') {
+          setRivalFrozenUntil(Date.now() + 4500)
+          setRivalBoard(cur => {
+            if (cur.length === 0) return cur
+            const flat = cur.flat()
+            for (let i = flat.length - 1; i > 0; i--) {
+              const j = Math.floor(Math.random() * (i + 1))
+              ;[flat[i], flat[j]] = [flat[j], flat[i]]
+            }
+            const reshuffled: Cell[][] = []
+            for (let r = 0; r < dims.rows; r++) {
+              reshuffled.push(flat.slice(r * dims.cols, (r + 1) * dims.cols))
+            }
+            return ensureSolvableBoard(reshuffled, dims.rows, dims.cols)
+          })
+          setNotice('☄️ ẢO THUẬT TSUKUYOMI & SUSANOO! Ngưng đọng 8s, Khiên 15s, Đóng băng Bot 4.5s & đảo tung toàn bộ bảng bot!')
+        } else if (playMode === 'pvp-online' && roomCode) {
+          sendRoomAction({ type: 'ultimate', charId: 'madara', newBoard: solvableBoard })
+          setNotice('☄️ ẢO THUẬT TSUKUYOMI & SUSANOO! Dồn cờ xuống đáy, Khiên 15s, Đóng băng 4.5s & đảo tung bảng đối thủ!')
+        } else {
+          setNotice('☄️ TRỌNG LỰC SUSANOO! Dồn toàn bộ quân cờ xuống đáy, Ngưng đọng thời gian 8s & Bật Khiên Susanoo 15s!')
         }
         break
       }
       case 'himeko': {
-        // 🔥 Laser Quỹ Đạo Chữ Thập + Solar Overdrive 10s (x3 Điểm & Hồi +2s mỗi nước nối)
+        // 🔥 Laser Quỹ Đạo Chữ Thập + Solar Overdrive 12s (x3 Điểm & Hồi +2s mỗi nước nối) + 4 Hạt Nhân Lửa (+80đ)
+        // PVP ĐẶC BIỆT: Thiêu đốt CƯỚP 60 điểm đối thủ + Mù Sương Nhiệt 5s + Khóa Tê Liệt 3.5s!
+        // TUYỆT ĐỐI KHÔNG XÓA CÁC CẶP Ô TRÊN BẢNG - Thay vào đó buff sức mạnh vượt bậc & cướp điểm đối thủ!
         playSound('astral', soundEnabled)
-        setSolarOverdriveUntil(Date.now() + 10000)
+        setSolarOverdriveUntil(Date.now() + 12000)
+        setScore(s => s + 60)
 
         // Quét chữ thập: Hàng giữa & Cột giữa
         const midR = Math.floor(dims.rows / 2)
         const midC = Math.floor(dims.cols / 2)
         setActiveLaserCross({ row: midR, col: midC })
-        setTimeout(() => setActiveLaserCross(null), 700)
+        setTimeout(() => setActiveLaserCross(null), 850)
 
-        // Xóa hoàn chỉnh các cặp (đảm bảo tính chẵn lẻ, không bao giờ tạo quân mồ côi!)
-        const res = findPairsToClear(board, 3, dims.rows, dims.cols)
-        let clearedBoard = res.newBoard
-        let pts = res.points || 60
-
-        if (res.cleared === 0) {
-          const valMap = new Map<number, Coord[]>()
-          for (let r = 0; r < dims.rows; r++) {
-            for (let c = 0; c < dims.cols; c++) {
-              const v = board[r][c]
-              if (v !== null) {
-                if (!valMap.has(v)) valMap.set(v, [])
-                valMap.get(v)!.push({ row: r, col: c })
-              }
-            }
-          }
-          for (const coords of valMap.values()) {
-            if (coords.length >= 2) {
-              clearedBoard = board.map(r => [...r])
-              clearedBoard[coords[0].row][coords[0].col] = null
-              clearedBoard[coords[1].row][coords[1].col] = null
-              pts = 30
-              break
-            }
+        // Chọn 4 ô bất kỳ trên bảng và biến thành Hạt Nhân Lửa Thánh (+80đ khi ăn)
+        const nonNullCoords: Coord[] = []
+        for (let r = 0; r < dims.rows; r++) {
+          for (let c = 0; c < dims.cols; c++) {
+            if (board[r][c] !== null) nonNullCoords.push({ row: r, col: c })
           }
         }
+        const shuffled = [...nonNullCoords].sort(() => Math.random() - 0.5).slice(0, 4)
+        const newFireCores = shuffled.map(c => `${c.row}-${c.col}`)
+        setSolarFireCoords(prev => Array.from(new Set([...prev, ...newFireCores])))
 
-        const solvableBoard = ensureSolvableBoard(clearedBoard, dims.rows, dims.cols)
-        setScore(s => s + pts)
-        setBoard(solvableBoard)
-        if (playMode === 'pvp-online' && roomCode) {
-          sendRoomAction({ type: 'shuffle', newBoard: solvableBoard, points: pts })
-        }
+        // Tia laser từ avatar xuống các hạt nhân lửa
+        const avatarEl = document.getElementById('player-active-avatar')
+        const avatarRect = avatarEl?.getBoundingClientRect()
+        const startX = avatarRect ? avatarRect.left + avatarRect.width / 2 : window.innerWidth * 0.15
+        const startY = avatarRect ? avatarRect.top + avatarRect.height / 2 : 120
+        const beams: AvatarSkillBeam[] = shuffled.map((c, i) => {
+          const tileEl = document.getElementById(`board-tile-${c.row}-${c.col}`)
+          const tileRect = tileEl?.getBoundingClientRect()
+          return {
+            id: `beam_himeko_${i}_${Date.now()}`,
+            startX,
+            startY,
+            targetX: tileRect ? tileRect.left + tileRect.width / 2 : window.innerWidth * 0.5,
+            targetY: tileRect ? tileRect.top + tileRect.height / 2 : window.innerHeight * 0.5,
+            element: 'fire',
+            badge: '🔥',
+          }
+        })
+        setAvatarBeams(beams)
+        setTimeout(() => setAvatarBeams([]), 650)
 
         // Shockwaves dọc theo chữ thập
         setShockwaves(prev => [
@@ -2457,20 +2500,29 @@ export function MirrorRushGame() {
           { id: `sw_himeko_v_${Date.now()}`, x: ((midC + 0.5) / dims.cols) * 100, y: 50 },
         ])
 
-        setNotice(`🔥 BÃO LỬA THIÊN THỂ! Laser quét sạch các cặp trên chữ thập (+${pts}đ) & kích hoạt Solar Overdrive x3 Điểm 10s!`)
+        // PVP Mechanics: Thiêu đốt đối thủ, CƯỚP ĐIỂM, gây Mù Sương 5s & Khóa Nhiệt 3.5s
+        if (playMode === 'pvp-bot') {
+          const stolen = Math.min(rivalScore, 60)
+          setRivalScore(s => Math.max(0, s - stolen))
+          setScore(s => s + stolen)
+          setRivalFogUntil(Date.now() + 5000)
+          setRivalFrozenUntil(Date.now() + 3500)
+          setNotice(`🔥 BÃO LỬA THIÊN THỂ! Nhận +60đ, Solar Overdrive x3 Điểm 12s, CƯỚP ${stolen}đ từ Bot, gây Mù Sương 5s & Đóng Băng 3.5s!`)
+        } else if (playMode === 'pvp-online' && roomCode) {
+          sendRoomAction({ type: 'ultimate', charId: 'himeko' })
+          setNotice('🔥 BÃO LỬA THIÊN THỂ! Nhận +60đ, Solar Overdrive x3 Điểm 12s, CƯỚP 60đ đối thủ, gây Mù Sương 5s & Đóng Băng 3.5s!')
+        } else {
+          setNotice('🔥 BÃO LỬA THIÊN THỂ! Nhận +60đ tức thì, Solar Overdrive x3 Điểm 12s & kích hoạt 4 Hạt Nhân Lửa (+80đ)!')
+        }
         break
       }
       default: {
         playSound('match', soundEnabled)
-        const res = findPairsToClear(board, 2, dims.rows, dims.cols)
-        if (res.cleared > 0) {
-          const pts = res.points
-          applyElementalZap(res.pairs, 'electric', '⚡', res.newBoard, pts)
-        }
+        setNotice('✨ ĐÃ KÍCH HOẠT KỸ NĂNG ĐẶC BIỆT!')
         break
       }
     }
-  }, [gameOver, selectedCharacterId, energy, soundEnabled, playMode, board, dims.rows, dims.cols, doubleScoreTurnsLeft, triggerPlayerEmotion, triggerRivalEmotion, roomCode, playerId, sendRoomAction])
+  }, [gameOver, selectedCharacterId, energy, soundEnabled, playMode, board, dims.rows, dims.cols, triggerPlayerEmotion, triggerRivalEmotion, roomCode, sendRoomAction, rivalScore])
 
   /* ─── Matchmaking Queue Operations ─── */
   const cancelMatchmakingQueue = useCallback(async () => {
@@ -5062,6 +5114,8 @@ export function MirrorRushGame() {
                 linkPath={linkPath}
                 hintPair={hintPair || activeRadarPair}
                 wildcardCoords={wildcardCoords}
+                solarFireCoords={solarFireCoords}
+                electroCoreCoords={electroCoreCoords}
                 spriteTheme={spriteTheme}
                 tileStyle={equipped.tileStyle}
                 lineEffect={equipped.lineEffect}
@@ -5155,6 +5209,8 @@ export function MirrorRushGame() {
                 linkPath={linkPath}
                 hintPair={hintPair || activeRadarPair}
                 wildcardCoords={wildcardCoords}
+                solarFireCoords={solarFireCoords}
+                electroCoreCoords={electroCoreCoords}
                 spriteTheme={spriteTheme}
                 tileStyle={equipped.tileStyle}
                 lineEffect={equipped.lineEffect}

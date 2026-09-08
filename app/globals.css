@@ -3179,6 +3179,30 @@ select {
   100% { transform: scale(1.06); filter: drop-shadow(0 0 14px #ea580c); }
 }
 
+/* Solar Fire Core Tile Effect (Himeko) */
+.tile-is-solar-fire {
+  box-shadow: 0 0 18px rgba(249, 115, 22, 0.95), inset 0 0 12px rgba(239, 68, 68, 0.8) !important;
+  border: 2px solid #fdba74 !important;
+  animation: solarFirePulse 0.9s ease-in-out infinite alternate !important;
+}
+
+@keyframes solarFirePulse {
+  0% { transform: scale(1); filter: drop-shadow(0 0 6px #f97316); }
+  100% { transform: scale(1.05); filter: drop-shadow(0 0 16px #ef4444); }
+}
+
+/* Electro Core Tile Effect (Satoshi) */
+.tile-is-electro-core {
+  box-shadow: 0 0 16px rgba(250, 204, 21, 0.95), inset 0 0 10px rgba(234, 179, 8, 0.7) !important;
+  border: 2px solid #fef08a !important;
+  animation: electroCorePulse 0.85s ease-in-out infinite alternate !important;
+}
+
+@keyframes electroCorePulse {
+  0% { transform: scale(1); filter: drop-shadow(0 0 5px #facc15); }
+  100% { transform: scale(1.05); filter: drop-shadow(0 0 15px #eab308); }
+}
+
 /* Cross Laser Beam Clearance Flash */
 .laser-cross-anim {
   position: absolute;

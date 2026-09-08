@@ -48,6 +48,7 @@ export interface PlayerState {
   board: Cell[][]
   frozenUntil: number
   fogUntil: number
+  immunityUntil?: number
   energy: number
   ultimateActiveUntil?: number
   doubleScoreTurnsLeft?: number
@@ -68,6 +69,7 @@ export interface RoomState {
   lastAction: {
     playerId: string
     type: 'match' | 'freeze' | 'shuffle' | 'fog' | 'scramble' | 'ultimate'
+    charId?: string
     skillId?: string
     coordA?: Coord
     coordB?: Coord
@@ -899,7 +901,8 @@ export function updatePlayerAction(
   code: string,
   playerId: string,
   action: {
-    type: 'match' | 'freeze' | 'scramble' | 'fog' | 'shuffle' | 'restart'
+    type: 'match' | 'freeze' | 'scramble' | 'fog' | 'shuffle' | 'restart' | 'ultimate'
+    charId?: string
     coordA?: Coord
     coordB?: Coord
     points?: number
@@ -1019,6 +1022,85 @@ export function updatePlayerAction(
     }
     if (typeof action.points === 'number' && action.points > 0) {
       player.score += action.points
+    }
+  } else if (action.type === 'ultimate') {
+    const charId = action.charId || 'satoshi'
+    player.energy = 0 // Tiêu hao năng lượng tuyệt kỹ
+
+    if (charId === 'himeko') {
+      player.score += 60
+      if (opponent) {
+        const isOppImmune = Boolean(opponent.immunityUntil && opponent.immunityUntil > Date.now())
+        if (!isOppImmune) {
+          const stolen = Math.min(opponent.score, 60)
+          opponent.score = Math.max(0, opponent.score - stolen)
+          opponent.fogUntil = Math.max(opponent.fogUntil, Date.now() + 5000)
+          opponent.frozenUntil = Math.max(opponent.frozenUntil, Date.now() + 3500)
+        }
+      }
+      room.lastAction = {
+        playerId,
+        type: 'ultimate',
+        charId: 'himeko',
+        timestamp: Date.now(),
+        message: `🔥 ${player.name} kích hoạt BÃO LỬA THIÊN THỂ: Hút 60 điểm, thiêu mù khói 5s & khóa nhiệt 3.5s!`,
+      }
+    } else if (charId === 'madara' || charId === 'maldara') {
+      player.immunityUntil = Date.now() + 15000
+      if (action.newBoard) {
+        player.board = action.newBoard
+        if (room.mode === 'shared') {
+          room.sharedBoard = action.newBoard
+        }
+      }
+      if (opponent) {
+        const isOppImmune = Boolean(opponent.immunityUntil && opponent.immunityUntil > Date.now())
+        if (!isOppImmune) {
+          opponent.frozenUntil = Math.max(opponent.frozenUntil, Date.now() + 4500)
+          // Xáo trộn toàn bộ cờ đối thủ
+          const remaining: number[] = []
+          const pos: Coord[] = []
+          const oppBoard = opponent.board
+          for (let r = 0; r < oppBoard.length; r++) {
+            for (let c = 0; c < oppBoard[r].length; c++) {
+              if (oppBoard[r][c] !== null) {
+                remaining.push(oppBoard[r][c]!)
+                pos.push({ row: r, col: c })
+              }
+            }
+          }
+          for (let i = remaining.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1))
+            ;[remaining[i], remaining[j]] = [remaining[j], remaining[i]]
+          }
+          for (let i = 0; i < pos.length; i++) {
+            oppBoard[pos[i].row][pos[i].col] = remaining[i]
+          }
+        }
+      }
+      room.lastAction = {
+        playerId,
+        type: 'ultimate',
+        charId: 'madara',
+        timestamp: Date.now(),
+        message: `☄️ ${player.name} kích hoạt ẢO THUẬT TSUKUYOMI: Đóng băng 4.5s & đảo tung toàn bộ bảng đối thủ!`,
+      }
+    } else if (charId === 'satoshi') {
+      if (opponent) {
+        const isOppImmune = Boolean(opponent.immunityUntil && opponent.immunityUntil > Date.now())
+        if (!isOppImmune) {
+          opponent.frozenUntil = Math.max(opponent.frozenUntil, Date.now() + 3500)
+          opponent.combo = 0
+          opponent.energy = Math.max(0, opponent.energy - 35)
+        }
+      }
+      room.lastAction = {
+        playerId,
+        type: 'ultimate',
+        charId: 'satoshi',
+        timestamp: Date.now(),
+        message: `⚡ ${player.name} kích hoạt SẤM SÉT 10 VẠN VOLT: Tê liệt 3.5s, bẻ gãy Combo & triệt tiêu 35% năng lượng!`,
+      }
     }
   } else if (action.type === 'restart') {
     const newBoard = generateBoardData(room.size)

@@ -8,7 +8,7 @@ export interface AvatarSkillBeam {
   startY: number
   targetX: number
   targetY: number
-  element: 'electric' | 'water' | 'holy' | 'astral' | 'shadow' | 'arrow' | 'cyber' | 'frost'
+  element: 'electric' | 'water' | 'holy' | 'astral' | 'shadow' | 'arrow' | 'cyber' | 'frost' | 'fire'
   badge: string
 }
 
@@ -124,12 +124,37 @@ export function AvatarSkillBeams({ beams }: { beams: AvatarSkillBeam[] }) {
           <stop offset="40%" stopColor="#bae6fd" />
           <stop offset="100%" stopColor="#38bdf8" />
         </linearGradient>
+
+        <linearGradient id="fireGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stopColor="#ffffff" />
+          <stop offset="30%" stopColor="#fef08a" />
+          <stop offset="65%" stopColor="#f97316" />
+          <stop offset="100%" stopColor="#dc2626" />
+        </linearGradient>
       </defs>
 
       {beams.map((b, idx) => {
         const { startX, startY, targetX, targetY, element } = b
         const midX = (startX + targetX) / 2
         const midY = (startY + targetY) / 2
+
+        if (element === 'fire') {
+          // 🔥 Himeko: Laser Quỹ Đạo Bão Lửa (Orbital Celestial Fire Ray)
+          return (
+            <g key={b.id} className="beam-fire-group">
+              <line x1={startX} y1={startY} x2={targetX} y2={targetY} stroke="#f97316" strokeWidth="12" opacity="0.4" filter="blur(5px)" />
+              <line x1={startX} y1={startY} x2={targetX} y2={targetY} stroke="url(#fireGrad)" strokeWidth="6" opacity="0.85" />
+              <line x1={startX} y1={startY} x2={targetX} y2={targetY} stroke="#ffffff" strokeWidth="2.5" />
+
+              {/* Solar Core Explosion at target */}
+              <circle cx={targetX} cy={targetY} r="26" fill="#f97316" opacity="0.5" filter="blur(4px)" />
+              <circle cx={targetX} cy={targetY} r="15" fill="url(#fireGrad)" opacity="0.9" />
+              <circle cx={targetX} cy={targetY} r="7" fill="#ffffff" />
+              <line x1={targetX - 20} y1={targetY} x2={targetX + 20} y2={targetY} stroke="#fed7aa" strokeWidth="2" />
+              <line x1={targetX} y1={targetY - 20} x2={targetX} y2={targetY + 20} stroke="#fed7aa" strokeWidth="2" />
+            </g>
+          )
+        }
 
         if (element === 'electric') {
           // ⚡ Satoshi: Sấm Sét Hoàng Kim (Zigzag Multi-Branch Lightning)
