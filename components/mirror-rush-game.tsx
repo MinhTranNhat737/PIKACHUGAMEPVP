@@ -760,6 +760,11 @@ export function MirrorRushGame() {
     return selectedCharacterId === 'satoshi' ? 'madara' : 'satoshi'
   }, [playMode, botLevel, selectedCharacterId])
 
+  // Current Bot configuration for PvP with Bot
+  const curBot = useMemo(() => {
+    return BOT_LEVELS.find(b => b.level === botLevel) || BOT_LEVELS[0]
+  }, [botLevel])
+
   // Helpers to trigger emotion with auto-reset to idle
   const triggerPlayerEmotion = useCallback((emotion: CharacterEmotion, duration = 1400) => {
     setPlayerEmotion(emotion)
@@ -4894,8 +4899,8 @@ export function MirrorRushGame() {
       {/* ─── Match Arenas: Solo vs PVP ─── */}
       {playMode === 'solo' || boardMode === 'shared' ? (
         /* CHẾ ĐỘ 1 BẢNG (Solo hoặc PVP Chung 1 Bảng ở giữa) */
-        <section className="arena-solo">
-          {/* CỘT TAY TRÁI: NHÂN VẬT VIDEO HERO BATTLE PANEL */}
+        <section className={`arena-solo ${playMode !== 'solo' ? 'with-avatar-cols' : ''}`}>
+          {/* CỘT TAY TRÁI: NHÂN VẬT VIDEO HERO BATTLE PANEL (CHẾ ĐỘ SOLO) */}
           {playMode === 'solo' && (() => {
             const curChar = getCharacterById(selectedCharacterId)
             const canUse = energy >= curChar.ultimate.energyCost
@@ -4978,6 +4983,47 @@ export function MirrorRushGame() {
               </aside>
             )
           })()}
+
+          {/* CỘT TAY TRÁI KHI CHƠI BÀN CHUNG (PVP BOT HOẶC PVP ONLINE) */}
+          {playMode !== 'solo' && (
+            <div className="pvp-avatar-column">
+              <div className="pvp-avatar-card is-player">
+                <CharacterAvatar
+                  domId="player-active-avatar"
+                  characterId={selectedCharacterId}
+                  emotion={playerEmotion}
+                  size="sm"
+                  shape="rect"
+                  showSpeech={playerEmotion !== 'idle'}
+                  useVideo={useVideoAvatar}
+                />
+              </div>
+              <span className="pvp-avatar-name">{playerName}</span>
+              <span className="pvp-avatar-score" style={{ color: '#facc15' }}>{score} đ</span>
+              <span className="pvp-avatar-label is-player">BẠN</span>
+
+              {/* Nút Tuyệt Kỹ & Năng Lượng Gọn Gàng */}
+              {(() => {
+                const curChar = getCharacterById(selectedCharacterId)
+                const canUse = energy >= curChar.ultimate.energyCost
+                return (
+                  <button
+                    className={`pvp-skill-btn pvp-ult-btn char-${curChar.id} ${canUse ? 'ready' : ''}`}
+                    onClick={triggerUltimateSkill}
+                    disabled={!canUse}
+                    style={{ width: '88px', marginTop: '4px' }}
+                    title={`${curChar.ultimate.name}: ${curChar.ultimate.description} (Cần ${curChar.ultimate.energyCost}% NL)`}
+                  >
+                    <span style={{ fontSize: '15px' }}>{curChar.ultimate.icon}</span>
+                    <span style={{ fontWeight: 900 }}>TUYỆT KỸ</span>
+                    <small style={{ color: canUse ? '#fde047' : '#94a3b8' }}>
+                      {canUse ? 'SẴN SÀNG!' : `${energy}%/${curChar.ultimate.energyCost}%`}
+                    </small>
+                  </button>
+                )
+              })()}
+            </div>
+          )}
 
           <div className={`board-frame ${isMeFrozen ? 'is-frozen' : ''} ${isMeFogged ? 'is-fogged' : ''} ${combo >= 2 ? 'combo-on-fire' : ''} ${equipped.boardTheme} ${equipped.boardFrame}`} style={{ flex: 1, minWidth: 0 }}>
             {isImmune && <div className="debuff-banner" style={{ background: 'rgba(56,189,248,0.25)', color: '#38bdf8', borderColor: '#38bdf8' }}>🛡️ HÀO QUANG BẤT HOẠI (MIỄN NHIỄM HIỆU ỨNG)</div>}
@@ -5064,31 +5110,15 @@ export function MirrorRushGame() {
             )}
 
             {playMode !== 'solo' && boardMode === 'shared' && (
-              <div className="board-header">
-                <div className="board-player-info">
-                  <CharacterAvatar
-                    domId="player-active-avatar"
-                    characterId={selectedCharacterId}
-                    emotion={playerEmotion}
-                    size="sm"
-                    showSpeech={playerEmotion !== 'idle'}
-                    useVideo={useVideoAvatar}
-                  />
-                  <span>{playerName}: <strong style={{ color: '#facc15' }}>{score} đ</strong></span>
+              <div className="board-header" style={{ justifyContent: 'space-between', padding: '6px 12px', alignItems: 'center' }}>
+                <div style={{ fontSize: '13px', fontWeight: 800, color: '#facc15' }}>
+                  {playerName}: <strong>{score} đ</strong>
                 </div>
-                <div style={{ fontSize: '13px', fontWeight: 900, color: '#22c55e' }}>
-                  BÀN CHUNG
+                <div style={{ fontSize: '12px', fontWeight: 900, color: '#22c55e', background: 'rgba(34, 197, 94, 0.15)', border: '1px solid rgba(34, 197, 94, 0.3)', borderRadius: '6px', padding: '2px 10px' }}>
+                  ⚡ BÀN CHUNG {playMode === 'pvp-bot' ? '· ĐẤU VỚI MÁY' : '· PVP 2 NGƯỜI'}
                 </div>
-                <div className="board-player-info">
-                  <span>{rivalName}: <strong style={{ color: '#f43f5e' }}>{rivalScore} đ</strong></span>
-                  <CharacterAvatar
-                    domId="rival-active-avatar"
-                    characterId={rivalCharacterId}
-                    emotion={rivalEmotion}
-                    size="sm"
-                    showSpeech={rivalEmotion !== 'idle'}
-                    useVideo={useVideoAvatar}
-                  />
+                <div style={{ fontSize: '13px', fontWeight: 800, color: '#f43f5e' }}>
+                  {playMode === 'pvp-bot' ? `${curBot.name} (Lv.${curBot.level})` : (rivalName || 'Chờ...')}: <strong>{rivalScore} đ</strong>
                 </div>
               </div>
             )}
@@ -5143,6 +5173,35 @@ export function MirrorRushGame() {
               />
             )}
           </div>
+
+          {/* CỘT TAY PHẢI KHI CHƠI BÀN CHUNG (MÁY HOẶC ĐỐI THỦ) */}
+          {playMode !== 'solo' && (
+            <div className="pvp-avatar-column">
+              <div className="pvp-avatar-card is-rival">
+                <CharacterAvatar
+                  domId="rival-active-avatar"
+                  characterId={rivalCharacterId}
+                  emotion={rivalEmotion}
+                  size="sm"
+                  shape="rect"
+                  showSpeech={rivalEmotion !== 'idle'}
+                  useVideo={useVideoAvatar}
+                />
+              </div>
+              <span className="pvp-avatar-name">
+                {playMode === 'pvp-bot' ? `${curBot.name} (Lv.${curBot.level})` : (rivalName || 'Chờ...')}
+              </span>
+              <span className="pvp-avatar-score" style={{ color: '#f43f5e' }}>{rivalScore} đ</span>
+              <span className="pvp-avatar-label is-rival">
+                {playMode === 'pvp-bot' ? `MÁY (BOT)` : 'ĐỐI THỦ'}
+              </span>
+              {playMode === 'pvp-bot' && (
+                <div className="pvp-bot-badge">
+                  {curBot.avatar} {curBot.title}
+                </div>
+              )}
+            </div>
+          )}
         </section>
       ) : (
         /* CHẾ ĐỘ RIÊNG BẢNG (2 Bảng Khác Nhau Ở 2 Bên Trái - Phải + Chiêu Thức) */
@@ -5151,6 +5210,7 @@ export function MirrorRushGame() {
           <div className="pvp-avatar-column">
             <div className="pvp-avatar-card is-player">
               <CharacterAvatar
+                domId="player-active-avatar"
                 characterId={selectedCharacterId}
                 emotion={playerEmotion}
                 size="sm"
@@ -5191,7 +5251,6 @@ export function MirrorRushGame() {
             <div className="board-header">
               <div className="board-player-info">
                 <CharacterAvatar
-                  domId="player-active-avatar"
                   characterId={selectedCharacterId}
                   emotion={playerEmotion}
                   size="sm"
@@ -5359,17 +5418,16 @@ export function MirrorRushGame() {
             <div className="board-header">
               <div className="board-player-info">
                 <CharacterAvatar
-                  domId="rival-active-avatar"
                   characterId={rivalCharacterId}
                   emotion={rivalEmotion}
                   size="sm"
                   showSpeech={rivalEmotion !== 'idle'}
                   useVideo={useVideoAvatar}
                 />
-                <span>{rivalName ? `${rivalName} (ĐỐI THỦ)` : 'Chờ người thứ 2... (TRỐNG)'}</span>
+                <span>{playMode === 'pvp-bot' ? `${curBot.name} (MÁY · CẤP ${curBot.level})` : (rivalName ? `${rivalName} (ĐỐI THỦ)` : 'Chờ người thứ 2... (TRỐNG)')}</span>
               </div>
               <div className="board-score-pill" style={{ color: '#f43f5e' }}>
-                {rivalName ? `${rivalScore} ĐIỂM` : 'TRỐNG'}
+                {playMode === 'pvp-bot' ? `${rivalScore} ĐIỂM` : (rivalName ? `${rivalScore} ĐIỂM` : 'TRỐNG')}
               </div>
             </div>
 
@@ -5395,10 +5453,11 @@ export function MirrorRushGame() {
             )}
           </div>
 
-          {/* Cột Avatar Bên Phải: Nhân vật ĐỐI THỦ */}
+          {/* Cột Avatar Bên Phải: Nhân vật ĐỐI THỦ / MÁY */}
           <div className="pvp-avatar-column">
             <div className="pvp-avatar-card is-rival">
               <CharacterAvatar
+                domId="rival-active-avatar"
                 characterId={rivalCharacterId}
                 emotion={rivalEmotion}
                 size="sm"
@@ -5407,9 +5466,18 @@ export function MirrorRushGame() {
                 useVideo={useVideoAvatar}
               />
             </div>
-            <span className="pvp-avatar-name">{rivalName || 'Chờ...'}</span>
+            <span className="pvp-avatar-name">
+              {playMode === 'pvp-bot' ? `${curBot.name} (Lv.${curBot.level})` : (rivalName || 'Chờ...')}
+            </span>
             <span className="pvp-avatar-score" style={{ color: '#f43f5e' }}>{rivalScore} đ</span>
-            <span className="pvp-avatar-label is-rival">ĐỐI THỦ</span>
+            <span className="pvp-avatar-label is-rival">
+              {playMode === 'pvp-bot' ? 'MÁY (BOT)' : 'ĐỐI THỦ'}
+            </span>
+            {playMode === 'pvp-bot' && (
+              <div className="pvp-bot-badge">
+                {curBot.avatar} {curBot.title}
+              </div>
+            )}
           </div>
         </section>
       )}
@@ -5527,12 +5595,16 @@ export function MirrorRushGame() {
                   />
                   {gameOver === 'win' ? (
                     <div className="stage-loser-ground">
-                      <span style={{ fontSize: '10px', color: '#f43f5e', fontWeight: 800 }}>🌧️ Đối Thủ</span>
+                      <span style={{ fontSize: '10px', color: '#f43f5e', fontWeight: 800 }}>
+                        🌧️ {playMode === 'pvp-bot' ? `${curBot.name} (MÁY)` : 'Đối Thủ'}
+                      </span>
                       <div style={{ fontSize: '11px', color: '#cbd5e1' }}>{rivalScore} đ</div>
                     </div>
                   ) : (
                     <div className="stage-winner-pedestal">
-                      <span style={{ fontSize: '11px', fontWeight: 900, color: '#0f172a' }}>🏆 ĐỐI THỦ</span>
+                      <span style={{ fontSize: '11px', fontWeight: 900, color: '#0f172a' }}>
+                        🏆 {playMode === 'pvp-bot' ? `${curBot.name} (MÁY)` : 'ĐỐI THỦ'}
+                      </span>
                       <div style={{ fontSize: '12px', fontWeight: 900, color: '#fef08a' }}>{rivalScore} ĐIỂM</div>
                     </div>
                   )}
