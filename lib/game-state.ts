@@ -112,6 +112,7 @@ export interface MatchmakingQueueEntry {
   rankPoints: number
   joinedAt: number
   matchedRoomCode?: string
+  isHost?: boolean
   opponent?: {
     playerId: string
     name: string
@@ -142,6 +143,8 @@ if (!globalThis.__PIKA_WAIT_TIMES) {
 if (!globalThis.__PIKA_LEADERBOARD) {
   globalThis.__PIKA_LEADERBOARD = []
 }
+
+const rooms = globalThis.__PIKA_ROOMS!
 
 export function getLeaderboard(): LeaderboardEntry[] {
   if (!globalThis.__PIKA_LEADERBOARD) {
@@ -185,22 +188,69 @@ export function getAverageQueueTimeSeconds(): number {
   return Math.max(4, Math.round(avg))
 }
 
+export interface MatchInfoPayload {
+  rivalName: string
+  rivalRankTier: RankTierInfo
+  rivalCharacterId: string
+  roomCode: string
+  isBot: boolean
+  isHost: boolean
+}
+
+export interface MatchmakingResult {
+  success: boolean
+  status: 'waiting' | 'matched' | 'not_found'
+  matched: boolean
+  roomCode?: string
+  isHost?: boolean
+  opponent?: { playerId: string; name: string; characterId: string; rankPoints: number }
+  match?: MatchInfoPayload
+  averageWaitSeconds: number
+  elapsedSeconds: number
+}
+
+function formatMatchResult(entry: MatchmakingQueueEntry, elapsedSec: number): MatchmakingResult {
+  if (entry.matchedRoomCode && entry.opponent) {
+    const oppTier = getRankTier(entry.opponent.rankPoints)
+    return {
+      success: true,
+      status: 'matched',
+      matched: true,
+      roomCode: entry.matchedRoomCode,
+      isHost: !!entry.isHost,
+      opponent: entry.opponent,
+      match: {
+        rivalName: entry.opponent.name,
+        rivalRankTier: oppTier,
+        rivalCharacterId: entry.opponent.characterId,
+        roomCode: entry.matchedRoomCode,
+        isBot: entry.opponent.playerId.startsWith('ai_'),
+        isHost: !!entry.isHost,
+      },
+      averageWaitSeconds: getAverageQueueTimeSeconds(),
+      elapsedSeconds: Math.max(0, Math.round(elapsedSec)),
+    }
+  }
+
+  return {
+    success: true,
+    status: 'waiting',
+    matched: false,
+    averageWaitSeconds: getAverageQueueTimeSeconds(),
+    elapsedSeconds: Math.max(0, Math.round(elapsedSec)),
+  }
+}
+
 export function enqueueMatchmaking(player: {
   playerId: string
   name: string
   characterId: string
   rankPoints: number
-}): {
-  status: 'waiting' | 'matched'
-  roomCode?: string
-  opponent?: { playerId: string; name: string; characterId: string; rankPoints: number }
-  averageWaitSeconds: number
-  elapsedSeconds: number
-} {
+}): MatchmakingResult {
   const queue = globalThis.__PIKA_MATCH_QUEUE!
   const now = Date.now()
 
-  // Clean stale queue entries (> 30s)
+  // Clean stale queue entries (> 35s)
   for (const [id, entry] of queue.entries()) {
     if (now - entry.joinedAt > 35000) {
       queue.delete(id)
@@ -213,29 +263,22 @@ export function enqueueMatchmaking(player: {
       playerId: player.playerId,
       name: player.name || 'Trainer',
       characterId: player.characterId || 'satoshi',
-      rankPoints: player.rankPoints || 500,
+      rankPoints: typeof player.rankPoints === 'number' ? player.rankPoints : 500,
       joinedAt: now,
     }
     queue.set(player.playerId, current)
   } else {
-    // Update data
-    current.name = player.name
-    current.characterId = player.characterId
-    current.rankPoints = player.rankPoints
-  }
-
-  // If already matched
-  if (current.matchedRoomCode && current.opponent) {
-    return {
-      status: 'matched',
-      roomCode: current.matchedRoomCode,
-      opponent: current.opponent,
-      averageWaitSeconds: getAverageQueueTimeSeconds(),
-      elapsedSeconds: Math.round((now - current.joinedAt) / 1000),
-    }
+    current.name = player.name || current.name
+    current.characterId = player.characterId || current.characterId
+    current.rankPoints = typeof player.rankPoints === 'number' ? player.rankPoints : current.rankPoints
   }
 
   const elapsedSec = (now - current.joinedAt) / 1000
+
+  // If already matched
+  if (current.matchedRoomCode && current.opponent) {
+    return formatMatchResult(current, elapsedSec)
+  }
 
   // Find candidate opponent in queue
   let bestCandidate: MatchmakingQueueEntry | null = null
@@ -246,10 +289,6 @@ export function enqueueMatchmaking(player: {
     const diff = Math.abs(other.rankPoints - current.rankPoints)
     const otherWaitSec = (now - other.joinedAt) / 1000
 
-    // Tolerance thresholds:
-    // 0-4s: max diff 200 (same rank)
-    // 4-7s: max diff 600 (adjacent rank)
-    // >7s: any diff (guarantee a match)
     const allowedDiff = (elapsedSec > 7 || otherWaitSec > 7) ? 99999 : (elapsedSec > 4 || otherWaitSec > 4) ? 600 : 200
 
     if (diff <= allowedDiff && diff < minDiff) {
@@ -260,40 +299,38 @@ export function enqueueMatchmaking(player: {
 
   if (bestCandidate) {
     // MATCH FOUND! Create room
-    const createdRoom = createRoom('', current.name, current.playerId, '14x8', 'separate')
-    joinRoom(createdRoom.code, bestCandidate.name, bestCandidate.playerId)
+    // The player who waited longer is designated host
+    const hostEntry = bestCandidate.joinedAt <= current.joinedAt ? bestCandidate : current
+    const guestEntry = hostEntry === bestCandidate ? current : bestCandidate
 
-    // Set opponent data
-    current.matchedRoomCode = createdRoom.code
-    current.opponent = {
-      playerId: bestCandidate.playerId,
-      name: bestCandidate.name,
-      characterId: bestCandidate.characterId,
-      rankPoints: bestCandidate.rankPoints,
+    const createdRoom = createRoom('', hostEntry.name, hostEntry.playerId, '14x8', 'separate')
+    joinRoom(createdRoom.code, guestEntry.name, guestEntry.playerId)
+
+    hostEntry.matchedRoomCode = createdRoom.code
+    hostEntry.isHost = true
+    hostEntry.opponent = {
+      playerId: guestEntry.playerId,
+      name: guestEntry.name,
+      characterId: guestEntry.characterId,
+      rankPoints: guestEntry.rankPoints,
     }
 
-    bestCandidate.matchedRoomCode = createdRoom.code
-    bestCandidate.opponent = {
-      playerId: current.playerId,
-      name: current.name,
-      characterId: current.characterId,
-      rankPoints: current.rankPoints,
+    guestEntry.matchedRoomCode = createdRoom.code
+    guestEntry.isHost = false
+    guestEntry.opponent = {
+      playerId: hostEntry.playerId,
+      name: hostEntry.name,
+      characterId: hostEntry.characterId,
+      rankPoints: hostEntry.rankPoints,
     }
 
-    // Record wait time for average calculation
     const recordedWait = Math.max(3, Math.round(elapsedSec))
     globalThis.__PIKA_WAIT_TIMES!.push(recordedWait)
     if (globalThis.__PIKA_WAIT_TIMES!.length > 20) {
       globalThis.__PIKA_WAIT_TIMES!.shift()
     }
 
-    return {
-      status: 'matched',
-      roomCode: createdRoom.code,
-      opponent: current.opponent,
-      averageWaitSeconds: getAverageQueueTimeSeconds(),
-      elapsedSeconds: Math.round(elapsedSec),
-    }
+    return formatMatchResult(current, elapsedSec)
   }
 
   // Fallback: If waited > 9 seconds and no real opponent available, pair with AI opponent at matching rank!
@@ -311,6 +348,7 @@ export function enqueueMatchmaking(player: {
     joinRoom(createdRoom.code, chosenAi.name, aiId)
 
     current.matchedRoomCode = createdRoom.code
+    current.isHost = true
     current.opponent = {
       playerId: aiId,
       name: chosenAi.name,
@@ -318,27 +356,111 @@ export function enqueueMatchmaking(player: {
       rankPoints: chosenAi.rp,
     }
 
+    return formatMatchResult(current, elapsedSec)
+  }
+
+  return formatMatchResult(current, elapsedSec)
+}
+
+export function pollMatchmaking(playerId: string): MatchmakingResult {
+  const queue = globalThis.__PIKA_MATCH_QUEUE!
+  const now = Date.now()
+
+  let current = queue.get(playerId)
+  if (!current) {
     return {
-      status: 'matched',
-      roomCode: createdRoom.code,
-      opponent: current.opponent,
+      success: true,
+      status: 'not_found',
+      matched: false,
       averageWaitSeconds: getAverageQueueTimeSeconds(),
-      elapsedSeconds: Math.round(elapsedSec),
+      elapsedSeconds: 0,
     }
   }
 
-  return {
-    status: 'waiting',
-    averageWaitSeconds: getAverageQueueTimeSeconds(),
-    elapsedSeconds: Math.round(elapsedSec),
+  const elapsedSec = (now - current.joinedAt) / 1000
+
+  // If already matched
+  if (current.matchedRoomCode && current.opponent) {
+    return formatMatchResult(current, elapsedSec)
   }
+
+  // Try finding candidate during polling
+  let bestCandidate: MatchmakingQueueEntry | null = null
+  let minDiff = Infinity
+
+  for (const [otherId, other] of queue.entries()) {
+    if (otherId === playerId || other.matchedRoomCode) continue
+    const diff = Math.abs(other.rankPoints - current.rankPoints)
+    const otherWaitSec = (now - other.joinedAt) / 1000
+
+    const allowedDiff = (elapsedSec > 7 || otherWaitSec > 7) ? 99999 : (elapsedSec > 4 || otherWaitSec > 4) ? 600 : 200
+
+    if (diff <= allowedDiff && diff < minDiff) {
+      minDiff = diff
+      bestCandidate = other
+    }
+  }
+
+  if (bestCandidate) {
+    const hostEntry = bestCandidate.joinedAt <= current.joinedAt ? bestCandidate : current
+    const guestEntry = hostEntry === bestCandidate ? current : bestCandidate
+
+    const createdRoom = createRoom('', hostEntry.name, hostEntry.playerId, '14x8', 'separate')
+    joinRoom(createdRoom.code, guestEntry.name, guestEntry.playerId)
+
+    hostEntry.matchedRoomCode = createdRoom.code
+    hostEntry.isHost = true
+    hostEntry.opponent = {
+      playerId: guestEntry.playerId,
+      name: guestEntry.name,
+      characterId: guestEntry.characterId,
+      rankPoints: guestEntry.rankPoints,
+    }
+
+    guestEntry.matchedRoomCode = createdRoom.code
+    guestEntry.isHost = false
+    guestEntry.opponent = {
+      playerId: hostEntry.playerId,
+      name: hostEntry.name,
+      characterId: hostEntry.characterId,
+      rankPoints: hostEntry.rankPoints,
+    }
+
+    return formatMatchResult(current, elapsedSec)
+  }
+
+  // Fallback: AI Opponent after 9s
+  if (elapsedSec > 9) {
+    const aiRanks = [
+      { name: 'PikaBot Bạc', char: 'kasumi', rp: Math.max(300, current.rankPoints - 40) },
+      { name: 'RedKnight Vàng', char: 'paladin', rp: current.rankPoints },
+      { name: 'ShadowMaster', char: 'ninja', rp: current.rankPoints + 30 },
+      { name: 'CyberUnit-07', char: 'cyber', rp: current.rankPoints },
+    ]
+    const chosenAi = aiRanks[Math.floor(Math.random() * aiRanks.length)]
+    const aiId = `ai_${Date.now()}`
+
+    const createdRoom = createRoom('', current.name, current.playerId, '14x8', 'separate')
+    joinRoom(createdRoom.code, chosenAi.name, aiId)
+
+    current.matchedRoomCode = createdRoom.code
+    current.isHost = true
+    current.opponent = {
+      playerId: aiId,
+      name: chosenAi.name,
+      characterId: chosenAi.char,
+      rankPoints: chosenAi.rp,
+    }
+
+    return formatMatchResult(current, elapsedSec)
+  }
+
+  return formatMatchResult(current, elapsedSec)
 }
 
 export function cancelMatchmaking(playerId: string): boolean {
   return globalThis.__PIKA_MATCH_QUEUE?.delete(playerId) || false
 }
-
-const rooms = globalThis.__PIKA_ROOMS
 
 // Helper to generate a random board
 export function generateBoardData(sizeKey: GridSizeKey): Cell[][] {

@@ -1422,12 +1422,16 @@ export function MirrorRushGame() {
 
           const room: RoomState = data.room
           lastSyncUpdatedAtRef.current = room.updatedAt
-          const me = isHost ? room.host : room.guest
-          const opp = isHost ? room.guest : room.host
+          const amHost = room.host.id === playerId
+          if (isHost !== amHost) {
+            setIsHost(amHost)
+          }
+          const me = amHost ? room.host : room.guest
+          const opp = amHost ? room.guest : room.host
 
           if (room.mode === 'shared' && room.sharedBoard) {
             setBoard(room.sharedBoard)
-          } else if (me) {
+          } else if (me && me.board && me.board.length > 0) {
             setBoard(me.board)
           }
 
@@ -1441,7 +1445,9 @@ export function MirrorRushGame() {
           if (opp) {
             setRivalName(opp.name)
             setRivalScore(opp.score)
-            setRivalBoard(room.mode === 'shared' && room.sharedBoard ? room.sharedBoard : opp.board)
+            if (opp.board && opp.board.length > 0) {
+              setRivalBoard(room.mode === 'shared' && room.sharedBoard ? room.sharedBoard : opp.board)
+            }
             setRivalFrozenUntil(opp.frozenUntil)
             setRivalFogUntil(opp.fogUntil)
           }
@@ -1999,6 +2005,95 @@ export function MirrorRushGame() {
     setMatchWaitSeconds(0)
     setFoundMatch(null)
 
+    const onMatchSuccess = (matchInfo: {
+      rivalName: string
+      rivalRankTier?: { name: string; icon: string }
+      rivalCharacterId?: string
+      roomCode?: string
+      isBot?: boolean
+      isHost?: boolean
+    }) => {
+      if (matchmakingTimerRef.current) {
+        clearInterval(matchmakingTimerRef.current)
+        matchmakingTimerRef.current = null
+      }
+
+      setFoundMatch({
+        rivalName: matchInfo.rivalName,
+        rivalRank: matchInfo.rivalRankTier?.name || 'Tân Binh',
+        rivalRankIcon: matchInfo.rivalRankTier?.icon || '🥉',
+        rivalCharId: matchInfo.rivalCharacterId || 'kasumi',
+        roomCode: matchInfo.roomCode,
+        isBot: matchInfo.isBot,
+      })
+
+      playSound('match', soundEnabled)
+
+      // Show VS faceoff for 2.2 seconds, then launch match
+      setTimeout(() => {
+        setIsMatchmaking(false)
+        setFoundMatch(null)
+
+        if (matchInfo.roomCode && !matchInfo.isBot) {
+          setInputCode(matchInfo.roomCode)
+          setRoomCode(matchInfo.roomCode)
+          setIsHost(!!matchInfo.isHost)
+          setGridSize('14x8')
+          setBoardMode('separate')
+          setPlayMode('pvp-online')
+          setRivalName(matchInfo.rivalName)
+          setScore(0)
+          setRivalScore(0)
+          setCombo(0)
+          setEnergy(0)
+          setSelected(null)
+          setLinkPath(null)
+          setHintPair(null)
+          setFrozenUntil(0)
+          setFogUntil(0)
+          setRivalFrozenUntil(0)
+          setRivalFogUntil(0)
+          setGameOver(null)
+          setInGame(true)
+          setNotice(`⚔️ TRẬN ĐẤU XẾP HẠNG BẮT ĐẦU! VS ${matchInfo.rivalName}`)
+          playSound('match', soundEnabled)
+          if (bgmEnabled) startBgm()
+        } else {
+          // Bot or quick fallback match
+          setPlayMode('pvp-bot')
+          setGridSize('14x8')
+          setBoardMode('separate')
+          setRivalName(`${matchInfo.rivalName}`)
+          const newBoard = createLocalBoard('14x8')
+          setBoard(newBoard)
+          setRivalBoard(createLocalBoard('14x8'))
+          setScore(0)
+          setRivalScore(0)
+          setTimeLeft(DEFAULT_TIME)
+          setShufflesLeft(DEFAULT_SHUFFLES)
+          setHintsLeft(DEFAULT_HINTS)
+          setCombo(0)
+          setEnergy(0)
+          setSelected(null)
+          setLinkPath(null)
+          setHintPair(null)
+          setFrozenUntil(0)
+          setFogUntil(0)
+          setRivalFrozenUntil(0)
+          setRivalFogUntil(0)
+          setUltimateCutin(null)
+          setDoubleScoreTurnsLeft(0)
+          setImmunityUntil(0)
+          setTimerFrozenUntil(0)
+          setGameOver(null)
+          setInGame(true)
+          setNotice(`⚔️ TRẬN ĐẤU XẾP HẠNG BẮT ĐẦU! VS ${matchInfo.rivalName}`)
+          playSound('match', soundEnabled)
+          if (bgmEnabled) startBgm()
+        }
+      }, 2200)
+    }
+
     try {
       const res = await fetch('/api/matchmaking', {
         method: 'POST',
@@ -2007,6 +2102,7 @@ export function MirrorRushGame() {
           action: 'join',
           playerId,
           playerName: playerName || 'Trainer',
+          name: playerName || 'Trainer',
           characterId: selectedCharacterId,
           rankPoints,
         }),
@@ -2015,88 +2111,27 @@ export function MirrorRushGame() {
       if (data.success && data.averageWaitSeconds) {
         setAverageWaitSeconds(data.averageWaitSeconds)
       }
+      if (data.success && (data.matched || data.status === 'matched') && data.match) {
+        onMatchSuccess(data.match)
+        return
+      }
     } catch { }
 
     const interval = setInterval(async () => {
       setMatchWaitSeconds(s => s + 1)
       try {
-        const pollRes = await fetch(`/api/matchmaking?action=poll&playerId=${encodeURIComponent(playerId)}`)
+        const pollRes = await fetch(`/api/matchmaking?action=poll&playerId=${encodeURIComponent(playerId)}`, {
+          headers: { 'Cache-Control': 'no-cache' }
+        })
         const pollData = await pollRes.json()
-        if (pollData.matched && pollData.match) {
-          clearInterval(interval)
-          matchmakingTimerRef.current = null
-
-          const matchInfo = pollData.match
-          setFoundMatch({
-            rivalName: matchInfo.rivalName,
-            rivalRank: matchInfo.rivalRankTier?.name || 'Tân Binh',
-            rivalRankIcon: matchInfo.rivalRankTier?.icon || '🥉',
-            rivalCharId: matchInfo.rivalCharacterId || 'kasumi',
-            roomCode: matchInfo.roomCode,
-            isBot: matchInfo.isBot,
-          })
-
-          playSound('match', soundEnabled)
-
-          // Show VS faceoff for 2.2 seconds, then launch match
-          setTimeout(() => {
-            setIsMatchmaking(false)
-            setFoundMatch(null)
-
-            if (matchInfo.roomCode && !matchInfo.isBot) {
-              setInputCode(matchInfo.roomCode)
-              setRoomCode(matchInfo.roomCode)
-              setIsHost(false)
-              setGridSize('14x8')
-              setBoardMode('separate')
-              setPlayMode('pvp-online')
-              setRivalName(matchInfo.rivalName)
-              setBoard(createLocalBoard('14x8'))
-              setRivalBoard(createLocalBoard('14x8'))
-              setInGame(true)
-              setNotice(`⚔️ TRẬN ĐẤU XẾP HẠNG BẮT ĐẦU! VS ${matchInfo.rivalName}`)
-              playSound('match', soundEnabled)
-              if (bgmEnabled) startBgm()
-            } else {
-              // Bot or quick fallback match
-              setPlayMode('pvp-bot')
-              setGridSize('14x8')
-              setBoardMode('separate')
-              setRivalName(`${matchInfo.rivalName}`)
-              const newBoard = createLocalBoard('14x8')
-              setBoard(newBoard)
-              setRivalBoard(createLocalBoard('14x8'))
-              setScore(0)
-              setRivalScore(0)
-              setTimeLeft(DEFAULT_TIME)
-              setShufflesLeft(DEFAULT_SHUFFLES)
-              setHintsLeft(DEFAULT_HINTS)
-              setCombo(0)
-              setEnergy(0)
-              setSelected(null)
-              setLinkPath(null)
-              setHintPair(null)
-              setFrozenUntil(0)
-              setFogUntil(0)
-              setRivalFrozenUntil(0)
-              setRivalFogUntil(0)
-              setUltimateCutin(null)
-              setDoubleScoreTurnsLeft(0)
-              setImmunityUntil(0)
-              setTimerFrozenUntil(0)
-              setGameOver(null)
-              setInGame(true)
-              setNotice(`⚔️ TRẬN ĐẤU XẾP HẠNG BẮT ĐẦU! VS ${matchInfo.rivalName}`)
-              playSound('match', soundEnabled)
-              if (bgmEnabled) startBgm()
-            }
-          }, 2200)
+        if (pollData.success && (pollData.matched || pollData.status === 'matched') && pollData.match) {
+          onMatchSuccess(pollData.match)
         }
       } catch { }
     }, 1000)
 
     matchmakingTimerRef.current = interval
-  }, [playerId, playerName, selectedCharacterId, rankPoints, soundEnabled, bgmEnabled])
+  }, [playerId, playerName, selectedCharacterId, rankPoints, soundEnabled, bgmEnabled, user])
 
   /* ─── Bottom Actions ─── */
   const onShuffleClick = () => {
