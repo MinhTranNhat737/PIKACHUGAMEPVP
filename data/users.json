@@ -73,8 +73,11 @@
     },
     "createdAt": "2026-09-07T21:32:41.852Z",
     "lastLoginAt": "2026-09-07T21:32:41.852Z",
-    "lastLogin": 1788871588060,
-    "characterId": "paladin"
+    "lastLogin": 1788945819661,
+    "characterId": "paladin",
+    "botStars": {
+      "12": 3
+    }
   },
   {
     "id": "usr_1788816979300_xjmy",

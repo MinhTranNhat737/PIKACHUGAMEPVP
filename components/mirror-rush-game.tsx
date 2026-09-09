@@ -5,14 +5,16 @@ import {
   Volume2, VolumeX, Shuffle, Lightbulb, RotateCcw,
   Trophy, Users, User, Bot, Sparkles, Snowflake, Wind, EyeOff,
   Copy, Check, DoorOpen, LogOut, ArrowRight, ArrowLeft, ShieldAlert, Music,
-  Coins, ShoppingBag, Lock, Unlock, KeyRound, LogIn, BookOpen
+  Coins, ShoppingBag, Lock, Unlock, KeyRound, LogIn, BookOpen, Maximize2,
+  Swords, Flame, Zap, Shield, Crown, Compass, Milestone, Play
 } from 'lucide-react'
 import { playSound, startBgm, stopBgm, getIsBgmPlaying, autoUnlockAudio, isAudioRunning, subscribeAudioReady } from '@/lib/sound'
-import { GridSizeKey, BoardMode, GRID_DIMS, Cell, Coord, RoomState, LeaderboardEntry, BOT_LEVELS, BotLevelConfig, getRankTier } from '@/lib/game-state'
+import { GridSizeKey, BoardMode, GRID_DIMS, Cell, Coord, RoomState, LeaderboardEntry, BOT_LEVELS, BotLevelConfig, getRankTier, BOT_FLOORS, BotFloorConfig, getBotFloorByLevel } from '@/lib/game-state'
 import { SHOP_CATALOG, ShopItem, UserAccount } from '@/lib/shop-catalog'
 import { CharacterAvatar } from '@/components/character-avatar'
 import { AvatarSkillBeams, AvatarSkillBeam } from '@/components/avatar-skill-beams'
 import { CHARACTERS, CharacterEmotion, getCharacterById, UltimateSkill, PixelCharacter } from '@/lib/character-catalog'
+import { CAMPAIGN_CHAPTERS, CampaignChapter, BossStageConfig, getStageById, getChapterById } from '@/lib/campaign-catalog'
 
 export type SpriteTheme = 'artwork' | 'retro' | 'home'
 
@@ -36,7 +38,7 @@ const DEFAULT_TIME = 300 // 5 minutes
 const DEFAULT_HINTS = 3
 const DEFAULT_SHUFFLES = 10
 
-type PlayMode = 'solo' | 'pvp-bot' | 'pvp-online'
+type PlayMode = 'solo' | 'pvp-bot' | 'pvp-online' | 'campaign'
 
 /* ──────────────────────────────────────────────
    Pathfinding (Pikachu Classic Rules - Max 2 turns)
@@ -146,7 +148,7 @@ export interface ElementalZap {
   id: string
   row: number
   col: number
-  element: 'electric' | 'water' | 'holy' | 'astral' | 'shadow' | 'arrow' | 'cyber' | 'frost'
+  element: 'electric' | 'water' | 'holy' | 'astral' | 'shadow' | 'arrow' | 'cyber' | 'frost' | 'fire'
   badge: string
 }
 
@@ -165,6 +167,32 @@ function findPairsToClear(board: Cell[][], count: number, rows: number, cols: nu
       break
     }
   }
+
+  // Fallback nếu chưa đủ cặp ăn được: tìm bất kỳ cặp cùng hình nào để đảm bảo chiêu luôn phá hủy được ô cờ
+  if (cleared < count) {
+    const valMap = new Map<number, Coord[]>()
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const v = cur[r][c]
+        if (v !== null) {
+          if (!valMap.has(v)) valMap.set(v, [])
+          valMap.get(v)!.push({ row: r, col: c })
+        }
+      }
+    }
+    for (const coords of valMap.values()) {
+      while (coords.length >= 2 && cleared < count) {
+        const c1 = coords.pop()!
+        const c2 = coords.pop()!
+        pairs.push([c1, c2])
+        cur[c1.row][c1.col] = null
+        cur[c2.row][c2.col] = null
+        cleared++
+      }
+      if (cleared >= count) break
+    }
+  }
+
   return { pairs, newBoard: cur, cleared, points: cleared * 15 }
 }
 
@@ -463,21 +491,21 @@ const BoardView = React.memo(function BoardView({
                     />
                   )}
                   {isSolarFire && (
-                    <div className="zap-element-badge" style={{ background: 'linear-gradient(135deg, #f97316, #ef4444)', color: '#ffffff', boxShadow: '0 0 10px rgba(249, 115, 22, 0.9)', fontWeight: 900 }}>
+                    <div className="tile-corner-tag fire-tag">
                       🔥 +80đ
                     </div>
                   )}
                   {isElectroCore && !isSolarFire && (
-                    <div className="zap-element-badge" style={{ background: 'linear-gradient(135deg, #facc15, #eab308)', color: '#713f12', boxShadow: '0 0 10px rgba(250, 204, 21, 0.9)', fontWeight: 900 }}>
+                    <div className="tile-corner-tag electro-tag">
                       ⚡ +50đ
                     </div>
                   )}
                   {isWildcard && !isSolarFire && !isElectroCore && (
-                    <div className="zap-element-badge" style={{ background: '#facc15', color: '#713f12', boxShadow: '0 0 8px #facc15', fontWeight: 900 }}>
-                      ⚡ JOKER
+                    <div className="tile-corner-tag joker-tag">
+                      ⭐ JOKER
                     </div>
                   )}
-                  {activeZap && !isWildcard && !isSolarFire && !isElectroCore && (
+                  {activeZap && (
                     <div className="zap-element-badge">
                       {activeZap.badge}
                     </div>
@@ -585,7 +613,7 @@ function AdminUserRow({
               )}
             </div>
             <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>
-              Vượt Bot: Cấp {account.botLevel || 1}/15 · Đồ sở hữu: {account.unlockedItems?.length || 0} món
+              Vượt Bot: Cấp {account.botLevel || 1}/50 · Đồ sở hữu: {account.unlockedItems?.length || 0} món
             </div>
           </div>
         </div>
@@ -697,6 +725,31 @@ export function MirrorRushGame() {
   const [bgmEnabled, setBgmEnabled] = useState(true)
   const [audioReady, setAudioReady] = useState(false)
 
+  // Tùy chỉnh kích thước / Thu phóng màn hình (Auto / 100% / 90% / 85% / 75%)
+  const [uiScale, setUiScale] = useState<'auto' | '100' | '90' | '85' | '75'>('auto')
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('mirror_rush_ui_scale') as 'auto' | '100' | '90' | '85' | '75' | null
+      if (saved && ['auto', '100', '90', '85', '75'].includes(saved)) {
+        setUiScale(saved)
+      }
+    } catch {}
+  }, [])
+
+  const cycleUiScale = useCallback(() => {
+    const scales: ('auto' | '100' | '90' | '85' | '75')[] = ['auto', '100', '90', '85', '75']
+    setUiScale(curr => {
+      const nextIdx = (scales.indexOf(curr) + 1) % scales.length
+      const nextScale = scales[nextIdx]
+      try {
+        localStorage.setItem('mirror_rush_ui_scale', nextScale)
+      } catch {}
+      return nextScale
+    })
+    playSound('select', soundEnabled)
+  }, [soundEnabled])
+
   const toggleBgm = useCallback(() => {
     if (bgmEnabled) {
       stopBgm()
@@ -727,6 +780,21 @@ export function MirrorRushGame() {
   const [coins, setCoins] = useState<number>(100)
   const [botLevel, setBotLevel] = useState<number>(1)
   const [maxUnlockedBotLevel, setMaxUnlockedBotLevel] = useState<number>(1)
+  const [botStars, setBotStars] = useState<Record<number, number>>({})
+  const [selectedBotFloor, setSelectedBotFloor] = useState<number>(1)
+  const [lastEarnedBotStars, setLastEarnedBotStars] = useState<number>(0)
+
+  const totalBotStars = useMemo(() => {
+    return Object.values(botStars).reduce((sum, s) => sum + (Number(s) || 0), 0)
+  }, [botStars])
+
+  // Automatically keep selectedBotFloor aligned with current botLevel
+  useEffect(() => {
+    const floorInfo = getBotFloorByLevel(botLevel)
+    if (floorInfo) {
+      setSelectedBotFloor(floorInfo.floor)
+    }
+  }, [botLevel])
   const [equipped, setEquipped] = useState<{
     boardTheme: string
     boardFrame: string
@@ -753,13 +821,17 @@ export function MirrorRushGame() {
   const rivalEmotionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Rival Character based on Bot Level or PVP Mode (3 Characters: Satoshi, Madara, Himeko)
+  const [onlineRivalCharacterId, setOnlineRivalCharacterId] = useState<string | null>(null)
   const rivalCharacterId = useMemo(() => {
+    if (playMode === 'pvp-online' && onlineRivalCharacterId) {
+      return onlineRivalCharacterId
+    }
     if (playMode === 'pvp-bot') {
       const roster = ['madara', 'himeko', 'satoshi']
       return roster[(botLevel - 1) % roster.length]
     }
     return selectedCharacterId === 'satoshi' ? 'madara' : 'satoshi'
-  }, [playMode, botLevel, selectedCharacterId])
+  }, [playMode, onlineRivalCharacterId, botLevel, selectedCharacterId])
 
   // Current Bot configuration for PvP with Bot
   const curBot = useMemo(() => {
@@ -837,9 +909,55 @@ export function MirrorRushGame() {
   const [activeSkillZaps, setActiveSkillZaps] = useState<ElementalZap[]>([])
   const [avatarBeams, setAvatarBeams] = useState<AvatarSkillBeam[]>([])
   const [useVideoAvatar, setUseVideoAvatar] = useState<boolean>(true)
-  const [activeLobbyScreen, setActiveLobbyScreen] = useState<'menu' | 'character-select' | 'ranked'>('menu')
+  const [activeLobbyScreen, setActiveLobbyScreen] = useState<'menu' | 'character-select' | 'ranked' | 'campaign'>('menu')
   const [previewCharId, setPreviewCharId] = useState<string>('satoshi')
   const [previewEmotion, setPreviewEmotion] = useState<CharacterEmotion>('idle')
+
+  // Page Loading Splash Screen & Page Transition State
+  const [isAppLoading, setIsAppLoading] = useState<boolean>(true)
+  const [loadingMessage, setLoadingMessage] = useState<string>('Đang tải trò chơi...')
+  const loadingTimerRef = useRef<NodeJS.Timeout | null>(null)
+
+  const triggerLoadingTransition = useCallback((message: string = 'Đang chuyển trang...', callback?: () => void, durationMs = 500) => {
+    if (loadingTimerRef.current) clearTimeout(loadingTimerRef.current)
+    setLoadingMessage(message)
+    setIsAppLoading(true)
+    loadingTimerRef.current = setTimeout(() => {
+      if (callback) callback()
+      loadingTimerRef.current = setTimeout(() => {
+        setIsAppLoading(false)
+      }, 300)
+    }, durationMs)
+  }, [])
+
+  const navigateToLobbyScreen = useCallback((screen: 'menu' | 'character-select' | 'ranked' | 'campaign', msg: string = 'Đang chuyển trang...') => {
+    playSound('select', soundEnabled)
+    triggerLoadingTransition(msg, () => {
+      setActiveLobbyScreen(screen)
+    }, 450)
+  }, [soundEnabled, triggerLoadingTransition])
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setIsAppLoading(false)
+    }, 1200)
+    return () => clearTimeout(timer)
+  }, [])
+
+  // 5-Chapter Boss Campaign State
+  const [campaignChapterId, setCampaignChapterId] = useState<number>(1)
+  const [currentCampaignStage, setCurrentCampaignStage] = useState<BossStageConfig | null>(null)
+  const [campaignProgress, setCampaignProgress] = useState<Record<number, boolean>>({})
+  const [storyModalStage, setStoryModalStage] = useState<BossStageConfig | null>(null)
+
+  useEffect(() => {
+    try {
+      const savedProg = localStorage.getItem('mirror_rush_campaign_progress')
+      if (savedProg) {
+        setCampaignProgress(JSON.parse(savedProg))
+      }
+    } catch {}
+  }, [])
   const [matchingPair, setMatchingPair] = useState<[Coord, Coord] | null>(null)
   const isMatchingRef = useRef<boolean>(false)
   const isAutoSwappingRef = useRef<boolean>(false)
@@ -871,6 +989,7 @@ export function MirrorRushGame() {
 
   // Online Multiplayer Room State
   const [roomCode, setRoomCode] = useState<string | null>(null)
+  const [currentRoomState, setCurrentRoomState] = useState<RoomState | null>(null)
   const [isHost, setIsHost] = useState(true)
   const [inputCode, setInputCode] = useState('')
   const [copiedCode, setCopiedCode] = useState(false)
@@ -885,14 +1004,87 @@ export function MirrorRushGame() {
   const [immunityUntil, setImmunityUntil] = useState<number>(0)
   const [timerFrozenUntil, setTimerFrozenUntil] = useState<number>(0)
   const [rankPoints, setRankPoints] = useState<number>(0) // Bắt đầu ở rank Đồng (0 RP)
+  const [rivalRankPoints, setRivalRankPoints] = useState<number>(500)
+  const [lastEarnedRp, setLastEarnedRp] = useState<number>(0)
+  const [lastEarnedCoins, setLastEarnedCoins] = useState<number>(0)
+  const [isRankUp, setIsRankUp] = useState<boolean>(false)
+
+  // Live ticker for active skill countdowns on the board header
+  const [buffTick, setBuffTick] = useState(0)
+  useEffect(() => {
+    if (
+      solarOverdriveUntil > Date.now() ||
+      thunderRadarUntil > Date.now() ||
+      timerFrozenUntil > Date.now() ||
+      immunityUntil > Date.now() ||
+      doubleScoreTurnsLeft > 0
+    ) {
+      const t = setInterval(() => setBuffTick(x => x + 1), 250)
+      return () => clearInterval(t)
+    }
+  }, [solarOverdriveUntil, thunderRadarUntil, timerFrozenUntil, immunityUntil, doubleScoreTurnsLeft])
+
+  // Active Ultimate Effect info (shown on board header, hiding skill button)
+  const activeUltEffect = useMemo(() => {
+    const now = Date.now()
+    if (solarOverdriveUntil > now) {
+      return {
+        icon: '🔥',
+        name: 'BÃO LỬA OVERDRIVE',
+        detail: 'x3 Điểm & Hồi +2s/cặp',
+        secs: Math.max(0, Math.ceil((solarOverdriveUntil - now) / 1000)),
+        colorTheme: 'fire',
+      }
+    }
+    if (thunderRadarUntil > now) {
+      return {
+        icon: '⚡',
+        name: 'RADAR HOÀNG KIM',
+        detail: 'Hiển thị mọi đường nối',
+        secs: Math.max(0, Math.ceil((thunderRadarUntil - now) / 1000)),
+        colorTheme: 'lightning',
+      }
+    }
+    if (timerFrozenUntil > now) {
+      return {
+        icon: '❄️',
+        name: 'NGƯNG ĐỌNG THỜI GIAN',
+        detail: 'Đồng hồ ngưng đọng',
+        secs: Math.max(0, Math.ceil((timerFrozenUntil - now) / 1000)),
+        colorTheme: 'ice',
+      }
+    }
+    if (immunityUntil > now) {
+      return {
+        icon: '🛡️',
+        name: 'HÀO QUANG SUSANOO',
+        detail: 'Bảo hộ miễn nhiễm hiệu ứng',
+        secs: Math.max(0, Math.ceil((immunityUntil - now) / 1000)),
+        colorTheme: 'shadow',
+      }
+    }
+    if (doubleScoreTurnsLeft > 0) {
+      return {
+        icon: '✨',
+        name: 'BỘI SỐ HOÀNG KIM',
+        detail: `${doubleScoreTurnsLeft} Nước nối x2 Điểm`,
+        secs: doubleScoreTurnsLeft,
+        colorTheme: 'gold',
+      }
+    }
+    return null
+  }, [solarOverdriveUntil, thunderRadarUntil, timerFrozenUntil, immunityUntil, doubleScoreTurnsLeft, buffTick])
 
   // Dedicated Rank Leaderboard state
   const [leaderboardTab, setLeaderboardTab] = useState<'scores' | 'rankings'>('rankings')
   const [rankedPlayers, setRankedPlayers] = useState<Array<{
+    rank?: number
     username: string
     displayName: string
     characterId?: string
     rankPoints: number
+    rankWins?: number
+    rankLosses?: number
     tier: string
     tierName: string
     tierIcon: string
@@ -908,6 +1100,7 @@ export function MirrorRushGame() {
     rivalName: string
     rivalRank: string
     rivalRankIcon: string
+    rivalRankPoints?: number
     rivalCharId: string
     roomCode?: string
     isBot?: boolean
@@ -951,6 +1144,34 @@ export function MirrorRushGame() {
   const isRivalFrozen = rivalFrozenUntil > now
   const isRivalFogged = rivalFogUntil > now
   const userRank = useMemo(() => getRankTier(rankPoints), [rankPoints])
+
+  // Computed rank tier for Bot based on floor & level
+  const curBotRank = useMemo(() => {
+    const rp = 100 + (curBot.level * 55)
+    return getRankTier(rp)
+  }, [curBot.level])
+  const curBotRp = useMemo(() => 100 + (curBot.level * 55), [curBot.level])
+
+  // Computed rank tier for Campaign Boss based on stage
+  const curBossRank = useMemo(() => {
+    if (!currentCampaignStage) return getRankTier(1500)
+    const rp = 1000 + (currentCampaignStage.stageId * 150)
+    return getRankTier(rp)
+  }, [currentCampaignStage])
+  const curBossRp = useMemo(() => currentCampaignStage ? 1000 + (currentCampaignStage.stageId * 150) : 1500, [currentCampaignStage])
+
+  // Current active rival rank tier & RP in whatever mode is playing
+  const activeRivalRankTier = useMemo(() => {
+    if (playMode === 'campaign') return curBossRank
+    if (playMode === 'pvp-bot') return curBotRank
+    return getRankTier(rivalRankPoints)
+  }, [playMode, curBossRank, curBotRank, rivalRankPoints])
+
+  const activeRivalRp = useMemo(() => {
+    if (playMode === 'campaign') return curBossRp
+    if (playMode === 'pvp-bot') return curBotRp
+    return rivalRankPoints
+  }, [playMode, curBossRp, curBotRp, rivalRankPoints])
 
   const activeRadarPair = useMemo(() => {
     if (thunderRadarUntil <= Date.now() || gameOver) return null
@@ -1041,9 +1262,18 @@ export function MirrorRushGame() {
     const gMaxWins = localStorage.getItem('PIKA_GUEST_MAX_WINS')
     const gHolder = localStorage.getItem('PIKA_GUEST_MAX_WINS_HOLDER')
     const gWins = localStorage.getItem('PIKA_GUEST_WINS')
+    const gRp = localStorage.getItem('PIKA_GUEST_RANK_POINTS')
 
     if (gCoins) setCoins(parseInt(gCoins, 10))
     if (gLvl) setMaxUnlockedBotLevel(parseInt(gLvl, 10))
+    if (gRp) {
+      const parsedRp = parseInt(gRp, 10)
+      if (!isNaN(parsedRp)) setRankPoints(parsedRp)
+    }
+    const gStars = localStorage.getItem('PIKA_GUEST_BOT_STARS')
+    if (gStars) {
+      try { setBotStars(JSON.parse(gStars)) } catch { }
+    }
     if (gEquipped) {
       try { setEquipped(JSON.parse(gEquipped)) } catch { }
     }
@@ -1060,6 +1290,7 @@ export function MirrorRushGame() {
     setPlayerName(u.displayName || u.username)
     setCoins(u.coins)
     setMaxUnlockedBotLevel(u.botLevelProgress || 1)
+    if (u.botStars) setBotStars(u.botStars)
     if (u.rankPoints !== undefined) setRankPoints(u.rankPoints)
     if (u.characterId) {
       const validChar = ['satoshi', 'madara', 'maldara', 'himeko'].includes(u.characterId) ? u.characterId : 'satoshi'
@@ -1078,6 +1309,14 @@ export function MirrorRushGame() {
     setSelectedCharacterId('satoshi')
     if (typeof window !== 'undefined') {
       localStorage.removeItem('PIKA_CURRENT_USER')
+      const gStars = localStorage.getItem('PIKA_GUEST_BOT_STARS')
+      if (gStars) {
+        try { setBotStars(JSON.parse(gStars)) } catch { setBotStars({}) }
+      } else {
+        setBotStars({})
+      }
+    } else {
+      setBotStars({})
     }
     loadGuestData()
   }, [loadGuestData])
@@ -1181,38 +1420,105 @@ export function MirrorRushGame() {
       return nextWins
     })
 
+    const oldTier = getRankTier(rankPoints)
+    let earnedRp = 0
+    let earnedCoins = 0
+
     if (playMode === 'pvp-bot') {
       const bot = BOT_LEVELS.find(b => b.level === botLevel) || BOT_LEVELS[0]
       const reward = bot.rewardCoins
-      awardCoins(reward, `Chiến thắng ${bot.name} (Cấp ${bot.level})!`)
+      earnedCoins = reward
+      earnedRp = 20 + Math.min(30, Math.floor(bot.level / 2))
 
-      if (botLevel >= maxUnlockedBotLevel && botLevel < 15) {
-        const nextLvl = botLevel + 1
+      // Calculate star rating (1 to 3 stars)
+      // 3 stars: remaining time >= 50% OR score lead >= 50
+      // 2 stars: remaining time >= 25% OR score lead >= 25
+      // 1 star: standard victory
+      const timePercent = timeLeft / Math.max(1, DEFAULT_TIME)
+      let earnedStars = 1
+      if (timePercent >= 0.5 || (score - rivalScore >= 50)) {
+        earnedStars = 3
+      } else if (timePercent >= 0.25 || (score - rivalScore >= 25)) {
+        earnedStars = 2
+      }
+      setLastEarnedBotStars(earnedStars)
+
+      const prevStars = botStars[botLevel] || 0
+      const newStars = Math.max(prevStars, earnedStars)
+      const updatedStars = { ...botStars, [botLevel]: newStars }
+      setBotStars(updatedStars)
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('PIKA_GUEST_BOT_STARS', JSON.stringify(updatedStars))
+      }
+
+      const starIcons = '⭐'.repeat(earnedStars)
+      awardCoins(reward, `Chiến thắng ${bot.name} (Cấp ${bot.level}) - Đạt ${starIcons}!`)
+
+      const nextLvl = Math.min(50, botLevel + 1)
+      if (botLevel >= maxUnlockedBotLevel && botLevel < 50) {
         setMaxUnlockedBotLevel(nextLvl)
-        if (user) {
-          fetch('/api/auth', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'advance-level', username: user.username, level: nextLvl }),
-          }).catch(() => { })
-        } else if (typeof window !== 'undefined') {
+        if (typeof window !== 'undefined') {
           localStorage.setItem('PIKA_GUEST_BOT_LEVEL', nextLvl.toString())
         }
       }
-    } else if (playMode === 'solo') {
-      awardCoins(100, 'Chiến thắng chế độ Solo!')
-    } else if (playMode === 'pvp-online') {
-      awardCoins(200, 'Chiến thắng trận đối kháng PVP Online!')
+
       if (user) {
-        setRankPoints(prev => prev + 60)
         fetch('/api/auth', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'add-rank-points', username: user.username, rankPoints: 60 }),
+          body: JSON.stringify({
+            action: 'advance-level',
+            username: user.username,
+            level: botLevel >= maxUnlockedBotLevel ? nextLvl : maxUnlockedBotLevel,
+            stars: earnedStars,
+          }),
         }).catch(() => { })
       }
+    } else if (playMode === 'solo') {
+      earnedCoins = 100
+      earnedRp = 10
+      awardCoins(100, 'Chiến thắng chế độ Solo!')
+    } else if (playMode === 'pvp-online') {
+      earnedCoins = 200
+      earnedRp = 65
+      awardCoins(200, 'Chiến thắng trận đối kháng PVP Online!')
+    } else if (playMode === 'campaign' && currentCampaignStage) {
+      const stage = currentCampaignStage
+      earnedCoins = stage.rewardCoins
+      earnedRp = 35 + Math.min(35, stage.stageId * 3)
+      awardCoins(stage.rewardCoins, `🏆 Hạ gục Boss ${stage.bossName} (${stage.name})!`)
+      setCampaignProgress(prev => {
+        const next = { ...prev, [stage.stageId]: true }
+        try {
+          localStorage.setItem('mirror_rush_campaign_progress', JSON.stringify(next))
+        } catch {}
+        return next
+      })
+      const chapter = getChapterById(stage.chapterId)
+      if (chapter && stage.stageId % 3 === 0) {
+        awardCoins(chapter.completionRewardCoins, `👑 Hoàn thành ${chapter.title}: Danh hiệu ${chapter.completionRewardTitle}!`)
+      }
+      setNotice(`🎉 CHIẾN THẮNG ẢI! ${stage.bossName}: "${stage.dialogueWin}"`)
     }
-  }, [playMode, botLevel, maxUnlockedBotLevel, user, awardCoins, playerName])
+
+    setLastEarnedRp(earnedRp)
+    setLastEarnedCoins(earnedCoins)
+
+    const nextRp = rankPoints + earnedRp
+    const newTier = getRankTier(nextRp)
+    setIsRankUp(newTier.minPoints > oldTier.minPoints)
+    setRankPoints(nextRp)
+
+    if (user) {
+      fetch('/api/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'add-rank-points', username: user.username, rankPoints: earnedRp, isWin: true }),
+      }).catch(() => { })
+    } else if (typeof window !== 'undefined') {
+      localStorage.setItem('PIKA_GUEST_RANK_POINTS', String(nextRp))
+    }
+  }, [playMode, botLevel, maxUnlockedBotLevel, user, awardCoins, playerName, currentCampaignStage, timeLeft, score, rivalScore, botStars])
 
   // Handle Shop Actions
   const handleShopAction = async (item: ShopItem) => {
@@ -1424,93 +1730,162 @@ export function MirrorRushGame() {
 
   // Thoát ván chơi về Menu và dọn dẹp sạch toàn bộ phòng/timer cũ
   const exitToMenu = useCallback(() => {
-    setInGame(false)
-    setRoomCode(null)
-    setInputCode('')
-    setIsMatchmaking(false)
-    setFoundMatch(null)
-    if (matchmakingTimerRef.current) {
-      clearInterval(matchmakingTimerRef.current)
-      matchmakingTimerRef.current = null
+    // Nếu đang trong trận PVP Online mà thoát trận, thông báo xử thua / đối thủ thắng
+    if (playMode === 'pvp-online' && roomCode) {
+      try {
+        fetch(`/api/rooms/${roomCode}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ playerId, action: { type: 'leave' } }),
+          keepalive: true,
+        }).catch(() => {})
+        if (wsRef.current && wsRef.current.readyState === 1) {
+          wsRef.current.send(JSON.stringify({ type: 'action', roomCode, playerId, action: { type: 'leave' } }))
+        }
+      } catch {}
     }
-    if (syncTimerRef.current) {
-      clearInterval(syncTimerRef.current)
-      syncTimerRef.current = null
-    }
-    if (botTimerRef.current) {
-      clearTimeout(botTimerRef.current)
-      botTimerRef.current = null
-    }
-    setSelected(null)
-    setLinkPath(null)
-    setHintPair(null)
-    setGameOver(null)
-    setUltimateCutin(null)
-    setDoubleScoreTurnsLeft(0)
-    setImmunityUntil(0)
-    setTimerFrozenUntil(0)
-    setSolarFireCoords([])
-    setElectroCoreCoords([])
-    setNotice('CHÀO MỪNG ĐẾN VỚI PIKACHU CLASSIC!')
-  }, [])
+
+    triggerLoadingTransition('Đang quay lại Menu chính...', () => {
+      setInGame(false)
+      setRoomCode(null)
+      setInputCode('')
+      setIsMatchmaking(false)
+      setFoundMatch(null)
+      if (matchmakingTimerRef.current) {
+        clearInterval(matchmakingTimerRef.current)
+        matchmakingTimerRef.current = null
+      }
+      if (syncTimerRef.current) {
+        clearInterval(syncTimerRef.current)
+        syncTimerRef.current = null
+      }
+      if (botTimerRef.current) {
+        clearTimeout(botTimerRef.current)
+        botTimerRef.current = null
+      }
+      setSelected(null)
+      setLinkPath(null)
+      setHintPair(null)
+      setGameOver(null)
+      setUltimateCutin(null)
+      setDoubleScoreTurnsLeft(0)
+      setImmunityUntil(0)
+      setTimerFrozenUntil(0)
+      setSolarFireCoords([])
+      setElectroCoreCoords([])
+      setNotice('CHÀO MỪNG ĐẾN VỚI PIKACHU CLASSIC!')
+    }, 450)
+  }, [playMode, roomCode, playerId, triggerLoadingTransition])
 
   // Start local match
   const startMatch = useCallback((size: GridSizeKey = gridSize) => {
-    // Đảm bảo xóa sạch mã phòng và timer đồng bộ cũ
-    setRoomCode(null)
-    if (syncTimerRef.current) {
-      clearInterval(syncTimerRef.current)
-      syncTimerRef.current = null
-    }
-    if (botTimerRef.current) {
-      clearTimeout(botTimerRef.current)
-      botTimerRef.current = null
-    }
-
-    const newBoard = createLocalBoard(size)
-    setBoard(newBoard)
-
-    if (playMode === 'pvp-bot') {
-      const curBot = BOT_LEVELS.find(b => b.level === botLevel) || BOT_LEVELS[0]
-      setRivalName(`${curBot.name} (Lv.${curBot.level})`)
-      if (boardMode === 'separate') {
-        // Different independent board for Rival bot!
-        setRivalBoard(createLocalBoard(size))
-      } else {
-        // Shared board
-        setRivalBoard(newBoard)
+    const msg = playMode === 'pvp-bot' ? 'Đang tải dữ liệu đối thủ Máy...' : 'Đang khởi tạo bàn cờ Pikachu...'
+    triggerLoadingTransition(msg, () => {
+      setRoomCode(null)
+      if (syncTimerRef.current) {
+        clearInterval(syncTimerRef.current)
+        syncTimerRef.current = null
       }
-    } else {
-      setRivalBoard([])
-    }
+      if (botTimerRef.current) {
+        clearTimeout(botTimerRef.current)
+        botTimerRef.current = null
+      }
 
-    setScore(0)
-    setRivalScore(0)
-    setTimeLeft(DEFAULT_TIME)
-    setShufflesLeft(DEFAULT_SHUFFLES)
-    setHintsLeft(DEFAULT_HINTS)
-    setCombo(0)
-    setEnergy(0)
-    setSelected(null)
-    setLinkPath(null)
-    setHintPair(null)
-    setFrozenUntil(0)
-    setFogUntil(0)
-    setRivalFrozenUntil(0)
-    setRivalFogUntil(0)
-    setSolarFireCoords([])
-    setElectroCoreCoords([])
-    setUltimateCutin(null)
-    setDoubleScoreTurnsLeft(0)
-    setImmunityUntil(0)
-    setTimerFrozenUntil(0)
-    setGameOver(null)
-    setInGame(true)
-    setNotice('BẮT ĐẦU VÁN MỚI! TÌM CÁC CẶP POKÉMON.')
-    if (bgmEnabled) {
-      startBgm()
-    }
-  }, [gridSize, playMode, boardMode, bgmEnabled, botLevel])
+      const newBoard = createLocalBoard(size)
+      setBoard(newBoard)
+
+      if (playMode === 'pvp-bot') {
+        const curBot = BOT_LEVELS.find(b => b.level === botLevel) || BOT_LEVELS[0]
+        setRivalName(`${curBot.name} (Lv.${curBot.level})`)
+        if (boardMode === 'separate') {
+          setRivalBoard(createLocalBoard(size))
+        } else {
+          setRivalBoard(newBoard)
+        }
+      } else {
+        setRivalBoard([])
+      }
+
+      setScore(0)
+      setRivalScore(0)
+      setTimeLeft(DEFAULT_TIME)
+      setShufflesLeft(DEFAULT_SHUFFLES)
+      setHintsLeft(DEFAULT_HINTS)
+      setCombo(0)
+      setEnergy(0)
+      setSelected(null)
+      setLinkPath(null)
+      setHintPair(null)
+      setFrozenUntil(0)
+      setFogUntil(0)
+      setRivalFrozenUntil(0)
+      setRivalFogUntil(0)
+      setSolarFireCoords([])
+      setElectroCoreCoords([])
+      setUltimateCutin(null)
+      setDoubleScoreTurnsLeft(0)
+      setImmunityUntil(0)
+      setTimerFrozenUntil(0)
+      setGameOver(null)
+      setInGame(true)
+      setNotice('BẮT ĐẦU VÁN MỚI! TÌM CÁC CẶP POKÉMON.')
+      if (bgmEnabled) {
+        startBgm()
+      }
+    }, 450)
+  }, [gridSize, playMode, boardMode, bgmEnabled, botLevel, triggerLoadingTransition])
+
+  // Khởi động trận đấu Chiến Dịch Trảm Boss
+  const startCampaignMatch = useCallback((stage: BossStageConfig) => {
+    triggerLoadingTransition(`Đang triệu hồi Boss ${stage.bossName}...`, () => {
+      setCurrentCampaignStage(stage)
+      setPlayMode('campaign')
+      setBoardMode('separate')
+      setStoryModalStage(null)
+
+      setRoomCode(null)
+      if (syncTimerRef.current) {
+        clearInterval(syncTimerRef.current)
+        syncTimerRef.current = null
+      }
+      if (botTimerRef.current) {
+        clearTimeout(botTimerRef.current)
+        botTimerRef.current = null
+      }
+
+      const newBoard = createLocalBoard(gridSize)
+      setBoard(newBoard)
+      setRivalBoard(createLocalBoard(gridSize))
+      setRivalName(`${stage.bossAvatar} ${stage.bossName}`)
+
+      setScore(0)
+      setRivalScore(0)
+      setTimeLeft(stage.targetTime || 200)
+      setShufflesLeft(DEFAULT_SHUFFLES)
+      setHintsLeft(DEFAULT_HINTS)
+      setCombo(0)
+      setEnergy(0)
+      setSelected(null)
+      setLinkPath(null)
+      setHintPair(null)
+      setFrozenUntil(0)
+      setFogUntil(0)
+      setRivalFrozenUntil(0)
+      setRivalFogUntil(0)
+      setSolarFireCoords([])
+      setElectroCoreCoords([])
+      setUltimateCutin(null)
+      setDoubleScoreTurnsLeft(0)
+      setImmunityUntil(0)
+      setTimerFrozenUntil(0)
+      setGameOver(null)
+      setInGame(true)
+      setNotice(`⚔️ CHIẾN DỊCH: ${stage.name}! Đối đầu ${stage.bossName}`)
+      if (bgmEnabled) {
+        startBgm()
+      }
+    }, 500)
+  }, [gridSize, bgmEnabled, triggerLoadingTransition])
 
   // Responsive & measurement test helper: Allows URL params like ?test=pvp or ?test=solo
   useEffect(() => {
@@ -1559,6 +1934,14 @@ export function MirrorRushGame() {
             } else {
               setNotice(`⏰ HẾT THỜI GIAN! BẠN CÒN ${remainingTiles} QUÂN CHƯA NỐI XONG NÊN THUA CUỘC.`)
             }
+          } else if (playMode === 'campaign' && currentCampaignStage) {
+            // Chiến dịch trảm boss: nếu điểm người chơi cao hơn thì chiến thắng!
+            isWin = curScore > curRivalScore
+            if (isWin) {
+              setNotice(`🏆 HẾT THỜI GIAN! BẠN CHIẾN THẮNG BOSS ${currentCampaignStage.bossName} (${curScore} vs ${curRivalScore})!`)
+            } else {
+              setNotice(`🌧️ HẾT THỜI GIAN! BOSS ${currentCampaignStage.bossName} ĐÃ THẮNG VỚI ĐIỂM CAO HƠN (${curRivalScore} vs ${curScore})!`)
+            }
           } else if (playMode === 'pvp-bot') {
             // 2. Chơi với máy: nếu thua điểm máy thì thua cuộc! (Nếu điểm cao hơn thì chiến thắng)
             isWin = curScore > curRivalScore
@@ -1568,14 +1951,9 @@ export function MirrorRushGame() {
               setNotice(`🌧️ HẾT THỜI GIAN! BẠN ĐÃ THUA VÌ THẤP ĐIỂM HƠN MÁY (${curScore} vs ${curRivalScore})!`)
             }
           } else {
-            // 3. PvP 2 người: hết thời gian tính xem điểm ai cao hơn thì chiến thắng!
-            isWin = curScore > curRivalScore
+            // 3. PvP 2 người: gửi timeout lên server để máy chủ tính toán người chiến thắng và phát sóng
             sendRoomActionRef.current({ type: 'timeout' })
-            if (isWin) {
-              setNotice(`🏆 HẾT THỜI GIAN! BẠN CHIẾN THẮNG PVP VỚI ĐIỂM CAO HƠN (${curScore} vs ${curRivalScore})!`)
-            } else {
-              setNotice(`🌧️ HẾT THỜI GIAN! ĐỐI THỦ ĐÃ CHIẾN THẮNG VỚI ĐIỂM CAO HƠN (${curRivalScore} vs ${curScore})!`)
-            }
+            return 0
           }
 
           setGameOver(isWin ? 'win' : 'lose')
@@ -1590,18 +1968,18 @@ export function MirrorRushGame() {
       })
     }, 1000)
     return () => clearInterval(timer)
-  }, [inGame, gameOver, soundEnabled, submitScoreToLeaderboard, handleGameWin, timerFrozenUntil, playMode, rivalName])
+  }, [inGame, gameOver, soundEnabled, submitScoreToLeaderboard, handleGameWin, timerFrozenUntil, playMode, rivalName, currentCampaignStage])
 
-  // Bot AI behavior in 'pvp-bot'
+  // Bot AI behavior in 'pvp-bot' and 'campaign'
   useEffect(() => {
-    if (!inGame || playMode !== 'pvp-bot' || gameOver || rivalBoard.length === 0) return
+    if (!inGame || (playMode !== 'pvp-bot' && playMode !== 'campaign') || gameOver || rivalBoard.length === 0) return
     if (isRivalFrozen) return
 
     const curBot = BOT_LEVELS.find(b => b.level === botLevel) || BOT_LEVELS[0]
+    const minD = playMode === 'campaign' && currentCampaignStage ? currentCampaignStage.moveDelayMin : curBot.moveDelayMin
+    const maxD = playMode === 'campaign' && currentCampaignStage ? currentCampaignStage.moveDelayMax : curBot.moveDelayMax
 
     const runBotMove = () => {
-      const minD = curBot.moveDelayMin
-      const maxD = curBot.moveDelayMax
       const calcDelay = minD + Math.random() * (maxD - minD)
       const baseDelay = isRivalFogged ? calcDelay * 1.6 : calcDelay
 
@@ -1688,7 +2066,75 @@ export function MirrorRushGame() {
     return () => {
       if (botTimerRef.current) clearTimeout(botTimerRef.current)
     }
-  }, [inGame, playMode, gameOver, rivalBoard.length, isRivalFrozen, isRivalFogged, boardMode, dims.rows, dims.cols, score, rivalScore, soundEnabled])
+  }, [inGame, playMode, gameOver, rivalBoard.length, isRivalFrozen, isRivalFogged, boardMode, dims.rows, dims.cols, score, rivalScore, soundEnabled, currentCampaignStage, botLevel])
+
+  // Boss AI Periodic Special Skill in Campaign Mode
+  useEffect(() => {
+    if (!inGame || playMode !== 'campaign' || gameOver || !currentCampaignStage) return
+    const intervalSec = currentCampaignStage.bossSkillInterval || 16
+
+    const timer = setInterval(() => {
+      if (isRivalFrozen) return
+      triggerRivalEmotion('happy', 1500)
+      playSound('laser', soundEnabled)
+
+      // Kiểm tra xem người chơi có đang bật Hào Quang Susanoo Bất Hoại không
+      if (immunityUntil > Date.now()) {
+        setNotice(`🛡️ HÀO QUANG SUSANOO ĐÃ PHẢN PHÁ TUYỆT KỸ [${currentCampaignStage.bossSkillName}] CỦA BOSS!`)
+        playSound('match', soundEnabled)
+        return
+      }
+
+      // Thi triển chiêu thức đặc biệt theo môi trường của ải
+      const env = currentCampaignStage.chapterEnvEffect
+      if (env === 'electro-storm') {
+        setNotice(`⚡ [${currentCampaignStage.bossName}] TUNG [${currentCampaignStage.bossSkillName}]! Tê liệt 2.5s!`)
+        setFrozenUntil(Date.now() + 2500)
+        triggerPlayerEmotion('sad', 1500)
+      } else if (env === 'magma-fire') {
+        setScore(s => {
+          const stolen = Math.min(s, 30)
+          setRivalScore(rs => rs + stolen)
+          setNotice(`🔥 [${currentCampaignStage.bossName}] TUNG [${currentCampaignStage.bossSkillName}]! Thiêu đốt cướp ${stolen}đ & Mù sương 4s!`)
+          return Math.max(0, s - stolen)
+        })
+        setFogUntil(Date.now() + 4000)
+        triggerPlayerEmotion('sad', 1500)
+      } else if (env === 'glacial-frost') {
+        setNotice(`❄️ [${currentCampaignStage.bossName}] TUNG [${currentCampaignStage.bossSkillName}]! Đóng băng 3.5s!`)
+        setFrozenUntil(Date.now() + 3500)
+        triggerPlayerEmotion('sad', 1500)
+      } else if (env === 'shadow-void') {
+        setNotice(`🌑 [${currentCampaignStage.bossName}] TUNG [${currentCampaignStage.bossSkillName}]! Đảo tung ma trận quân cờ!`)
+        setBoard(cur => {
+          if (cur.length === 0) return cur
+          const flat = cur.flat()
+          for (let i = flat.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1))
+            ;[flat[i], flat[j]] = [flat[j], flat[i]]
+          }
+          const reshuffled: Cell[][] = []
+          for (let r = 0; r < dims.rows; r++) {
+            reshuffled.push(flat.slice(r * dims.cols, (r + 1) * dims.cols))
+          }
+          return ensureSolvableBoard(reshuffled, dims.rows, dims.cols)
+        })
+        triggerPlayerEmotion('sad', 1500)
+      } else {
+        // astral-cosmic
+        setScore(s => {
+          const stolen = Math.min(s, 40)
+          setRivalScore(rs => rs + stolen)
+          setNotice(`🔮 [${currentCampaignStage.bossName}] TUNG [${currentCampaignStage.bossSkillName}]! Cướp ${stolen}đ và làm chậm thời không!`)
+          return Math.max(0, s - stolen)
+        })
+        setFrozenUntil(Date.now() + 2500)
+        triggerPlayerEmotion('sad', 1500)
+      }
+    }, intervalSec * 1000)
+
+    return () => clearInterval(timer)
+  }, [inGame, playMode, gameOver, currentCampaignStage, isRivalFrozen, immunityUntil, dims.rows, dims.cols, soundEnabled])
 
   // Online multiplayer sync — Ultra-low latency polling (200ms) with since-param optimization
   const lastSyncUpdatedAtRef = useRef<number>(0)
@@ -1696,6 +2142,7 @@ export function MirrorRushGame() {
 
   const applyRoomData = useCallback((room: RoomState) => {
     if (!room) return
+    setCurrentRoomState(room)
     lastSyncUpdatedAtRef.current = room.updatedAt
     const amHost = room.host.id === playerId
     if (isHost !== amHost) {
@@ -1729,6 +2176,12 @@ export function MirrorRushGame() {
     if (opp) {
       setRivalName(opp.name)
       setRivalScore(opp.score)
+      if (typeof opp.rankPoints === 'number') {
+        setRivalRankPoints(opp.rankPoints)
+      }
+      if (opp.characterId) {
+        setOnlineRivalCharacterId(opp.characterId)
+      }
       if (opp.board && opp.board.length > 0) {
         setRivalBoard(room.mode === 'shared' && room.sharedBoard ? room.sharedBoard : opp.board)
       }
@@ -1763,19 +2216,29 @@ export function MirrorRushGame() {
     }
 
     if (room.status === 'finished') {
-      setGameOver(prev => {
-        if (!prev) {
-          if (room.winnerId === playerId) {
-            playSound('win', soundEnabled)
-            handleGameWin()
-            return 'win'
-          } else {
-            playSound('lose', soundEnabled)
-            return 'lose'
+      const isWinner = room.winnerId === playerId
+      setGameOver(isWinner ? 'win' : 'lose')
+      if (isWinner) {
+        playSound('win', soundEnabled)
+        handleGameWin()
+      } else {
+        playSound('lose', soundEnabled)
+        setLastEarnedRp(-20)
+        setRankPoints(prev => {
+          const nextRp = Math.max(0, prev - 20)
+          if (typeof window !== 'undefined' && !user) {
+            localStorage.setItem('PIKA_GUEST_RANK_POINTS', String(nextRp))
           }
+          return nextRp
+        })
+        if (user) {
+          fetch('/api/auth', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'add-rank-points', username: user.username, rankPoints: -20, isWin: false }),
+          }).catch(() => { })
         }
-        return prev
-      })
+      }
     }
   }, [playerId, isHost, soundEnabled, handleGameWin, triggerPlayerEmotion, dims.rows, dims.cols])
 
@@ -1925,8 +2388,19 @@ export function MirrorRushGame() {
     syncRoom()
     syncTimerRef.current = setInterval(syncRoom, currentInterval)
 
+    const handleBeforeUnload = () => {
+      if (roomCode && inGame && playMode === 'pvp-online') {
+        const payload = JSON.stringify({ playerId, action: { type: 'leave' } })
+        if (typeof navigator !== 'undefined' && navigator.sendBeacon) {
+          navigator.sendBeacon(`/api/rooms/${roomCode}`, payload)
+        }
+      }
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload)
+
     return () => {
       isCleanedUp = true
+      window.removeEventListener('beforeunload', handleBeforeUnload)
       if (wsRef.current) {
         try { wsRef.current.close() } catch {}
         wsRef.current = null
@@ -2207,9 +2681,13 @@ export function MirrorRushGame() {
 
         const remaining = next.flat().filter(c => c !== null).length
         if (remaining === 0) {
-          setGameOver('win')
-          playSound('win', soundEnabled)
-          handleGameWin()
+          if (playMode !== 'pvp-online') {
+            setGameOver('win')
+            playSound('win', soundEnabled)
+            handleGameWin()
+          } else {
+            playSound('win', soundEnabled)
+          }
         } else {
           const pair = findAnyPair(next, dims.rows, dims.cols)
           if (!pair) {
@@ -2407,69 +2885,105 @@ export function MirrorRushGame() {
       setUltimateCutin(null)
     }, 1500)
 
+    // Hàm phóng tia chùm và giật nổ tiêu diệt ô cờ
+    const applyElementalZap = (
+      pairs: [Coord, Coord][],
+      element: ElementalZap['element'],
+      badge: string,
+      newBoard: Cell[][],
+      points: number,
+      onComplete?: () => void
+    ) => {
+      if (pairs.length === 0) return
+      const zaps: ElementalZap[] = []
+      pairs.forEach((pair, pIdx) => {
+        zaps.push({ id: `zap_${pIdx}_0_${Date.now()}`, row: pair[0].row, col: pair[0].col, element, badge })
+        zaps.push({ id: `zap_${pIdx}_1_${Date.now()}`, row: pair[1].row, col: pair[1].col, element, badge })
+      })
+      setActiveSkillZaps(zaps)
+
+      // Tia chùm năng lượng từ Avatar tới các ô mục tiêu
+      const avatarEl = document.getElementById('player-active-avatar')
+      const avatarRect = avatarEl?.getBoundingClientRect()
+      const startX = avatarRect ? avatarRect.left + avatarRect.width / 2 : window.innerWidth * 0.15
+      const startY = avatarRect ? avatarRect.top + avatarRect.height / 2 : 120
+
+      const beams: AvatarSkillBeam[] = []
+      pairs.forEach((pair, pIdx) => {
+        [pair[0], pair[1]].forEach((c, cIdx) => {
+          const tileEl = document.getElementById(`board-tile-${c.row}-${c.col}`)
+          const tileRect = tileEl?.getBoundingClientRect()
+          const targetX = tileRect ? tileRect.left + tileRect.width / 2 : window.innerWidth * 0.5
+          const targetY = tileRect ? tileRect.top + tileRect.height / 2 : window.innerHeight * 0.5
+          beams.push({
+            id: `beam_${pIdx}_${cIdx}_${Date.now()}`,
+            startX,
+            startY,
+            targetX,
+            targetY,
+            element,
+            badge,
+          })
+        })
+      })
+      setAvatarBeams(beams)
+      setTimeout(() => {
+        setAvatarBeams([])
+      }, 550)
+
+      setTimeout(() => {
+        const solvable = ensureSolvableBoard(newBoard, dims.rows, dims.cols)
+        setBoard(solvable)
+        setScore(s => s + points)
+        setActiveSkillZaps([])
+        if (playMode === 'pvp-online' && roomCode) {
+          sendRoomAction({
+            type: 'shuffle',
+            newBoard: solvable,
+            points,
+          })
+        }
+        if (onComplete) onComplete()
+      }, 500)
+    }
+
     // Thực thi hiệu ứng độc nhất vô nhị của từng nhân vật (Satoshi, Madara, Himeko)
     switch (curChar.id) {
       case 'satoshi': {
-        // ⚡ Radar Sấm Sét Hoàng Kim 10s + Tặng 15 Gợi ý & 3 Đổi Bài + 4 Hạt Nhân Sấm Sét (+50đ)
-        // PVP ĐẶC BIỆT: Tê liệt 3.5s + Bẻ gãy Combo về 0 + Triệt tiêu 35% năng lượng đối thủ!
+        // ⚡ Radar Sấm Sét Hoàng Kim 10s + Tặng 15 Gợi ý & 3 Đổi Bài + TIÊU DIỆT 2 CẶP POKÉMON (+30đ)
+        // PVP: Tê liệt 3.5s + Bẻ gãy Combo về 0 + Triệt tiêu 35% năng lượng đối thủ!
         playSound('thunder', soundEnabled)
         setThunderRadarUntil(Date.now() + 10000)
         setHintsLeft(h => h + 15)
         setShufflesLeft(s => s + 3)
 
-        // Chọn 4 ô bất kỳ trên bảng và biến thành Hạt Nhân Sấm Sét (+50đ khi ăn)
-        const nonNullCoords: Coord[] = []
-        for (let r = 0; r < dims.rows; r++) {
-          for (let c = 0; c < dims.cols; c++) {
-            if (board[r][c] !== null) nonNullCoords.push({ row: r, col: c })
-          }
+        // Phóng sét tiêu diệt 2 cặp Pokémon
+        const res = findPairsToClear(board, 2, dims.rows, dims.cols)
+        if (res.cleared > 0) {
+          applyElementalZap(res.pairs, 'electric', '⚡', res.newBoard, 30)
         }
-        const shuffled = [...nonNullCoords].sort(() => Math.random() - 0.5).slice(0, 4)
-        const newCores = shuffled.map(c => `${c.row}-${c.col}`)
-        setElectroCoreCoords(prev => Array.from(new Set([...prev, ...newCores])))
-
-        // Tia chớp nối từ avatar đến 4 ô biến đổi
-        const avatarEl = document.getElementById('player-active-avatar')
-        const avatarRect = avatarEl?.getBoundingClientRect()
-        const startX = avatarRect ? avatarRect.left + avatarRect.width / 2 : window.innerWidth * 0.15
-        const startY = avatarRect ? avatarRect.top + avatarRect.height / 2 : 120
-        const beams: AvatarSkillBeam[] = shuffled.map((c, i) => {
-          const tileEl = document.getElementById(`board-tile-${c.row}-${c.col}`)
-          const tileRect = tileEl?.getBoundingClientRect()
-          return {
-            id: `beam_satoshi_${i}_${Date.now()}`,
-            startX,
-            startY,
-            targetX: tileRect ? tileRect.left + tileRect.width / 2 : window.innerWidth * 0.5,
-            targetY: tileRect ? tileRect.top + tileRect.height / 2 : window.innerHeight * 0.5,
-            element: 'electric',
-            badge: '⚡',
-          }
-        })
-        setAvatarBeams(beams)
-        setTimeout(() => setAvatarBeams([]), 650)
 
         // PVP Mechanics
         if (playMode === 'pvp-bot') {
           setRivalFrozenUntil(Date.now() + 3500)
-          setNotice('⚡ SẤM SÉT 10 VẠN VOLT & RADAR HOÀNG KIM! Mở Radar 10s (+15 Gợi ý, +3 Đổi bài), Tê liệt Bot 3.5s & bẻ gãy Combo!')
+          setNotice('⚡ SẤM SÉT 10 VẠN VOLT! Tiêu diệt 2 cặp Pokémon (+30đ), mở Radar 10s (+15 Gợi ý, +3 Đổi bài) & Tê liệt Bot 3.5s!')
         } else if (playMode === 'pvp-online' && roomCode) {
           sendRoomAction({ type: 'ultimate', charId: 'satoshi' })
-          setNotice('⚡ SẤM SÉT 10 VẠN VOLT! Radar 10s (+15 Gợi ý), Tê liệt 3.5s, Bẻ gãy Combo & Triệt tiêu 35% năng lượng đối thủ!')
+          setNotice('⚡ SẤM SÉT 10 VẠN VOLT! Tiêu diệt 2 cặp Pokémon (+30đ), Radar 10s, Tê liệt 3.5s, Bẻ gãy Combo & Triệt tiêu 35% năng lượng đối thủ!')
         } else {
-          setNotice('⚡ RADAR SẤM SÉT HOÀNG KIM! Mở Radar 10s, tạo 4 Hạt Nhân Sấm Sét (+50đ) & Tặng +15 Gợi ý, +3 Đổi bài!')
+          setNotice('⚡ SẤM SÉT 10 VẠN VOLT! Tiêu diệt 2 cặp Pokémon (+30đ), mở Radar 10s & Tặng +15 Gợi ý, +3 Đổi bài!')
         }
         break
       }
       case 'madara':
       case 'maldara': {
-        // ☄️ Trọng Lực Susanoo (Dồn cờ xuống đáy) + Ngưng Đọng Thời Gian 8s + Khiên Hào Quang 15s
-        // PVP ĐẶC BIỆT: Phong ấn Tsukuyomi đóng băng 4.5s & đảo tung toàn bộ bảng đối thủ!
+        // ☄️ Trọng Lực Susanoo (Dồn cờ xuống đáy) + TIÊU DIỆT 1 CẶP (+25đ) + Ngưng Đọng Thời Gian 8s + Khiên Hào Quang 15s
+        // PVP: Phong ấn Tsukuyomi đóng băng 4.5s & đảo tung toàn bộ bảng đối thủ!
         playSound('slash', soundEnabled)
         setTimerFrozenUntil(Date.now() + 8000)
         setImmunityUntil(Date.now() + 15000)
 
-        // Dồn cờ xuống đáy (Gravity Fall) - Bảo toàn 100% quân cờ, không xóa ô nào
+        // Dồn cờ xuống đáy (Gravity Fall)
         const newBoard = board.map(row => [...row])
         for (let c = 0; c < dims.cols; c++) {
           const colCells: Cell[] = []
@@ -2482,8 +2996,15 @@ export function MirrorRushGame() {
             else newBoard[r][c] = colCells[r - startR]
           }
         }
-        const solvableBoard = ensureSolvableBoard(newBoard, dims.rows, dims.cols)
-        setBoard(solvableBoard)
+
+        // Susanoo nghiền nát tiêu diệt 1 cặp cờ
+        const res = findPairsToClear(newBoard, 1, dims.rows, dims.cols)
+        if (res.cleared > 0) {
+          applyElementalZap(res.pairs, 'shadow', '☄️', res.newBoard, 25)
+        } else {
+          const solvableBoard = ensureSolvableBoard(newBoard, dims.rows, dims.cols)
+          setBoard(solvableBoard)
+        }
 
         // Sóng chấn Susanoo
         const swId = `sw_susanoo_${Date.now()}`
@@ -2505,22 +3026,20 @@ export function MirrorRushGame() {
             }
             return ensureSolvableBoard(reshuffled, dims.rows, dims.cols)
           })
-          setNotice('☄️ ẢO THUẬT TSUKUYOMI & SUSANOO! Ngưng đọng 8s, Khiên 15s, Đóng băng Bot 4.5s & đảo tung toàn bộ bảng bot!')
+          setNotice('☄️ ẢO THUẬT TSUKUYOMI & SUSANOO! Dồn cờ, tiêu diệt 1 cặp (+25đ), Ngưng đọng 8s, Khiên 15s & đảo tung bảng bot!')
         } else if (playMode === 'pvp-online' && roomCode) {
-          sendRoomAction({ type: 'ultimate', charId: 'madara', newBoard: solvableBoard })
-          setNotice('☄️ ẢO THUẬT TSUKUYOMI & SUSANOO! Dồn cờ xuống đáy, Khiên 15s, Đóng băng 4.5s & đảo tung bảng đối thủ!')
+          sendRoomAction({ type: 'ultimate', charId: 'madara', newBoard: res.cleared > 0 ? res.newBoard : newBoard })
+          setNotice('☄️ ẢO THUẬT TSUKUYOMI & SUSANOO! Dồn cờ, tiêu diệt 1 cặp (+25đ), Khiên 15s, Đóng băng 4.5s & đảo tung bảng đối thủ!')
         } else {
-          setNotice('☄️ TRỌNG LỰC SUSANOO! Dồn toàn bộ quân cờ xuống đáy, Ngưng đọng thời gian 8s & Bật Khiên Susanoo 15s!')
+          setNotice('☄️ TRỌNG LỰC SUSANOO! Dồn cờ xuống đáy, tiêu diệt 1 cặp (+25đ), Ngưng đọng thời gian 8s & Bật Khiên Susanoo 15s!')
         }
         break
       }
       case 'himeko': {
-        // 🔥 Laser Quỹ Đạo Chữ Thập + Solar Overdrive 12s (x3 Điểm & Hồi +2s mỗi nước nối) + 4 Hạt Nhân Lửa (+80đ)
-        // PVP ĐẶC BIỆT: Thiêu đốt CƯỚP 60 điểm đối thủ + Mù Sương Nhiệt 5s + Khóa Tê Liệt 3.5s!
-        // TUYỆT ĐỐI KHÔNG XÓA CÁC CẶP Ô TRÊN BẢNG - Thay vào đó buff sức mạnh vượt bậc & cướp điểm đối thủ!
+        // 🔥 Laser Quỹ Đạo Chữ Thập + TIÊU DIỆT 2 CẶP POKÉMON (+45đ) + Solar Overdrive 12s (x3 Điểm & Hồi +2s mỗi nước nối)
+        // PVP: Thiêu đốt CƯỚP 60 điểm đối thủ + Mù Sương Nhiệt 5s + Khóa Tê Liệt 3.5s!
         playSound('astral', soundEnabled)
         setSolarOverdriveUntil(Date.now() + 12000)
-        setScore(s => s + 60)
 
         // Quét chữ thập: Hàng giữa & Cột giữa
         const midR = Math.floor(dims.rows / 2)
@@ -2528,37 +3047,13 @@ export function MirrorRushGame() {
         setActiveLaserCross({ row: midR, col: midC })
         setTimeout(() => setActiveLaserCross(null), 850)
 
-        // Chọn 4 ô bất kỳ trên bảng và biến thành Hạt Nhân Lửa Thánh (+80đ khi ăn)
-        const nonNullCoords: Coord[] = []
-        for (let r = 0; r < dims.rows; r++) {
-          for (let c = 0; c < dims.cols; c++) {
-            if (board[r][c] !== null) nonNullCoords.push({ row: r, col: c })
-          }
+        // Phóng laser bão lửa thiêu rụi và tiêu diệt 2 cặp Pokémon
+        const res = findPairsToClear(board, 2, dims.rows, dims.cols)
+        if (res.cleared > 0) {
+          applyElementalZap(res.pairs, 'fire', '🔥', res.newBoard, 45)
+        } else {
+          setScore(s => s + 45)
         }
-        const shuffled = [...nonNullCoords].sort(() => Math.random() - 0.5).slice(0, 4)
-        const newFireCores = shuffled.map(c => `${c.row}-${c.col}`)
-        setSolarFireCoords(prev => Array.from(new Set([...prev, ...newFireCores])))
-
-        // Tia laser từ avatar xuống các hạt nhân lửa
-        const avatarEl = document.getElementById('player-active-avatar')
-        const avatarRect = avatarEl?.getBoundingClientRect()
-        const startX = avatarRect ? avatarRect.left + avatarRect.width / 2 : window.innerWidth * 0.15
-        const startY = avatarRect ? avatarRect.top + avatarRect.height / 2 : 120
-        const beams: AvatarSkillBeam[] = shuffled.map((c, i) => {
-          const tileEl = document.getElementById(`board-tile-${c.row}-${c.col}`)
-          const tileRect = tileEl?.getBoundingClientRect()
-          return {
-            id: `beam_himeko_${i}_${Date.now()}`,
-            startX,
-            startY,
-            targetX: tileRect ? tileRect.left + tileRect.width / 2 : window.innerWidth * 0.5,
-            targetY: tileRect ? tileRect.top + tileRect.height / 2 : window.innerHeight * 0.5,
-            element: 'fire',
-            badge: '🔥',
-          }
-        })
-        setAvatarBeams(beams)
-        setTimeout(() => setAvatarBeams([]), 650)
 
         // Shockwaves dọc theo chữ thập
         setShockwaves(prev => [
@@ -2574,18 +3069,22 @@ export function MirrorRushGame() {
           setScore(s => s + stolen)
           setRivalFogUntil(Date.now() + 5000)
           setRivalFrozenUntil(Date.now() + 3500)
-          setNotice(`🔥 BÃO LỬA THIÊN THỂ! Nhận +60đ, Solar Overdrive x3 Điểm 12s, CƯỚP ${stolen}đ từ Bot, gây Mù Sương 5s & Đóng Băng 3.5s!`)
+          setNotice(`🔥 BÃO LỬA THIÊN THỂ! Tiêu diệt 2 cặp (+45đ), Solar Overdrive x3 Điểm 12s, CƯỚP ${stolen}đ từ Bot, gây Mù Sương 5s & Đóng Băng 3.5s!`)
         } else if (playMode === 'pvp-online' && roomCode) {
           sendRoomAction({ type: 'ultimate', charId: 'himeko' })
-          setNotice('🔥 BÃO LỬA THIÊN THỂ! Nhận +60đ, Solar Overdrive x3 Điểm 12s, CƯỚP 60đ đối thủ, gây Mù Sương 5s & Đóng Băng 3.5s!')
+          setNotice('🔥 BÃO LỬA THIÊN THỂ! Tiêu diệt 2 cặp (+45đ), Solar Overdrive x3 Điểm 12s, CƯỚP 60đ đối thủ, gây Mù Sương 5s & Đóng Băng 3.5s!')
         } else {
-          setNotice('🔥 BÃO LỬA THIÊN THỂ! Nhận +60đ tức thì, Solar Overdrive x3 Điểm 12s & kích hoạt 4 Hạt Nhân Lửa (+80đ)!')
+          setNotice('🔥 BÃO LỬA THIÊN THỂ! Tiêu diệt 2 cặp Pokémon (+45đ), kích hoạt Solar Overdrive x3 Điểm 12s!')
         }
         break
       }
       default: {
         playSound('match', soundEnabled)
-        setNotice('✨ ĐÃ KÍCH HOẠT KỸ NĂNG ĐẶC BIỆT!')
+        const res = findPairsToClear(board, 2, dims.rows, dims.cols)
+        if (res.cleared > 0) {
+          applyElementalZap(res.pairs, 'electric', '⚡', res.newBoard, 30)
+        }
+        setNotice('✨ ĐÃ KÍCH HOẠT KỸ NĂNG TIÊU DIỆT CẶP CỜ!')
         break
       }
     }
@@ -2627,7 +3126,8 @@ export function MirrorRushGame() {
 
     const onMatchSuccess = (matchInfo: {
       rivalName: string
-      rivalRankTier?: { name: string; icon: string }
+      rivalRankTier?: { name: string; icon: string; color?: string }
+      rivalRankPoints?: number
       rivalCharacterId?: string
       roomCode?: string
       isBot?: boolean
@@ -2638,10 +3138,15 @@ export function MirrorRushGame() {
         matchmakingTimerRef.current = null
       }
 
+      const oppRp = typeof matchInfo.rivalRankPoints === 'number' ? matchInfo.rivalRankPoints : 500
+      const tierObj = matchInfo.rivalRankTier || getRankTier(oppRp)
+      setRivalRankPoints(oppRp)
+
       setFoundMatch({
         rivalName: matchInfo.rivalName,
-        rivalRank: matchInfo.rivalRankTier?.name || 'Tân Binh',
-        rivalRankIcon: matchInfo.rivalRankTier?.icon || '🥉',
+        rivalRank: tierObj.name || 'Tân Binh',
+        rivalRankIcon: tierObj.icon || '🥉',
+        rivalRankPoints: oppRp,
         rivalCharId: matchInfo.rivalCharacterId || 'kasumi',
         roomCode: matchInfo.roomCode,
         isBot: matchInfo.isBot,
@@ -2804,6 +3309,37 @@ export function MirrorRushGame() {
 
   const renderSharedModals = () => (
     <>
+      {/* ─── Page Loading Splash Animation (Tên game kèm dòng chữ đang tải ở dưới) ─── */}
+      {isAppLoading && (
+        <div className="game-splash-loader">
+          <div className="game-splash-content">
+            <div className="game-splash-aura-back" />
+            <div className="game-splash-icon-wrapper">
+              <span className="game-splash-lightning">⚡</span>
+              <img
+                src={getSpriteUrl(25, 'artwork')}
+                alt="Pikachu"
+                className="game-splash-pikachu"
+              />
+              <span className="game-splash-lightning">⚡</span>
+            </div>
+            <h1 className="game-splash-title">
+              <span className="game-splash-title-gold">PIKACHU</span>
+              <span className="game-splash-title-cyan"> MIRROR RUSH</span>
+            </h1>
+            <div className="game-splash-bar-shell">
+              <div className="game-splash-bar-fill" />
+            </div>
+            <div className="game-splash-loading-text">
+              <span className="splash-pulse-dot" /> {loadingMessage}
+            </div>
+            <div className="game-splash-subtitle">
+              Đấu Trường Gương Thần · 5 Chương Cốt Truyện · Đấu Rank & Đối Kháng
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Coin Reward Toast */}
       {coinRewardToast && (
         <div style={{
@@ -3480,9 +4016,9 @@ export function MirrorRushGame() {
                   <div className="guidebook-feature-card">
                     <div className="feat-icon">🤖</div>
                     <div>
-                      <strong>Đấu Với Máy (15 Cấp Độ AI)</strong>
+                      <strong>Đấu Với Máy (50 Cấp Độ AI - 5 Tầng Thử Thách)</strong>
                       <p>
-                        Đối đầu với 15 Pokémon AI từ Cấp 1 (Caterpie - phản xạ chậm 8s) đến Cấp 15 (Mewtwo - thần tốc 1s). Thắng mỗi cấp mở khóa cấp tiếp theo và nhận từ <strong>+50 đến +400 Xu</strong>!
+                        Đối đầu với 50 Pokémon AI chia thành 5 Tầng thử thách, từ Cấp 1 (Caterpie) đến Cấp 50 (Arceus Thần Sáng Tạo). Mỗi màn có đánh giá 1-3 ⭐, bạn phải tích lũy đủ số Sao yêu cầu để vượt lên Tầng tiếp theo. Thưởng từ <strong>+50 đến +4000 Xu</strong>!
                       </p>
                     </div>
                   </div>
@@ -3733,7 +4269,7 @@ export function MirrorRushGame() {
                       {playerName}
                     </div>
                     <div style={{ fontSize: '11px', color: userRank.color, fontWeight: 700 }}>
-                      {userRank.icon} {userRank.name}
+                      {userRank.icon} {userRank.name} · {rankPoints.toLocaleString()} RP
                     </div>
                   </div>
 
@@ -3749,7 +4285,7 @@ export function MirrorRushGame() {
                       {foundMatch.rivalName}
                     </div>
                     <div style={{ fontSize: '11px', color: '#fb923c', fontWeight: 700 }}>
-                      {foundMatch.rivalRankIcon} {foundMatch.rivalRank}
+                      {foundMatch.rivalRankIcon} {foundMatch.rivalRank} · {(foundMatch.rivalRankPoints || 500).toLocaleString()} RP
                     </div>
                   </div>
                 </div>
@@ -3780,8 +4316,7 @@ export function MirrorRushGame() {
           <button
             className="btn-back-menu"
             onClick={() => {
-              playSound('select', soundEnabled)
-              setActiveLobbyScreen('menu')
+              navigateToLobbyScreen('menu', 'Đang quay lại Sảnh chính...')
             }}
           >
             <ArrowLeft size={16} /> Quay Lại Sảnh
@@ -3938,8 +4473,7 @@ export function MirrorRushGame() {
                 className="btn-confirm-character"
                 style={{ background: 'linear-gradient(135deg, #15803d 0%, #22c55e 100%)', color: '#ffffff' }}
                 onClick={() => {
-                  setActiveLobbyScreen('menu')
-                  playSound('select', soundEnabled)
+                  navigateToLobbyScreen('menu', 'Đang quay lại Sảnh chính...')
                 }}
               >
                 <Check size={18} /> ĐANG SỬ DỤNG · QUAY LẠI SẢNH
@@ -3951,7 +4485,7 @@ export function MirrorRushGame() {
                   handleSelectCharacter(previewChar.id)
                   playSound('win', soundEnabled)
                   setNotice(`ĐÃ CHỌN NHÂN VẬT: ${previewChar.name.toUpperCase()}!`)
-                  setActiveLobbyScreen('menu')
+                  navigateToLobbyScreen('menu', 'Đang lưu nhân vật và về Sảnh...')
                 }}
               >
                 <Check size={18} /> XÁC NHẬN CHỌN {previewChar.name.toUpperCase()}
@@ -4054,8 +4588,7 @@ export function MirrorRushGame() {
             className="btn-back-menu"
             onClick={() => {
               if (isMatchmaking) cancelMatchmakingQueue()
-              playSound('select', soundEnabled)
-              setActiveLobbyScreen('menu')
+              navigateToLobbyScreen('menu', 'Đang quay lại Sảnh chính...')
             }}
           >
             <ArrowLeft size={16} /> Quay Lại Sảnh
@@ -4120,7 +4653,7 @@ export function MirrorRushGame() {
                 style={{ background: 'none', border: 'none', color: '#38bdf8', fontSize: '11.5px', fontWeight: 800, padding: 0, cursor: 'pointer', marginTop: '2px' }}
                 onClick={() => {
                   setPreviewCharId(selectedCharacterId)
-                  setActiveLobbyScreen('character-select')
+                  navigateToLobbyScreen('character-select', 'Đang mở trang Đổi Nhân Vật...')
                 }}
               >
                 Đổi nhân vật ➔
@@ -4211,13 +4744,13 @@ export function MirrorRushGame() {
                 <div style={{ textAlign: 'center' }}>
                   <CharacterAvatar characterId={selectedCharacterId} emotion="combo" size="md" interactive={false} useVideo={useVideoAvatar} />
                   <div style={{ fontWeight: 800, color: '#f8fafc', fontSize: '14px', marginTop: '6px' }}>{playerName}</div>
-                  <div style={{ fontSize: '11.5px', color: userRank.color, fontWeight: 800 }}>{userRank.icon} {userRank.name}</div>
+                  <div style={{ fontSize: '11.5px', color: userRank.color, fontWeight: 800 }}>{userRank.icon} {userRank.name} · {rankPoints} RP</div>
                 </div>
                 <div className="vs-badge-animated">VS</div>
                 <div style={{ textAlign: 'center' }}>
                   <CharacterAvatar characterId={foundMatch.rivalCharId} emotion="combo" size="md" interactive={false} useVideo={useVideoAvatar} />
                   <div style={{ fontWeight: 800, color: '#f8fafc', fontSize: '14px', marginTop: '6px' }}>{foundMatch.rivalName}</div>
-                  <div style={{ fontSize: '11.5px', color: '#fb923c', fontWeight: 800 }}>{foundMatch.rivalRankIcon} {foundMatch.rivalRank}</div>
+                  <div style={{ fontSize: '11.5px', color: '#fb923c', fontWeight: 800 }}>{foundMatch.rivalRankIcon} {foundMatch.rivalRank} · {(foundMatch.rivalRankPoints || 500)} RP</div>
                 </div>
               </div>
               <div style={{ marginTop: '20px', fontSize: '13px', color: '#38bdf8', fontWeight: 800 }}>
@@ -4261,17 +4794,22 @@ export function MirrorRushGame() {
                 </tr>
               </thead>
               <tbody>
-                {(rankedPlayers.length > 0 ? rankedPlayers.slice(0, 8) : [
-                  { rank: 1, displayName: 'DragonMaster', rankTier: { name: 'Thách Đấu', icon: '👑' }, rankPoints: 2450, rankWins: 55, rankLosses: 12, charId: 'satoshi' },
-                  { rank: 2, displayName: 'PikaPro_VN', rankTier: { name: 'Cao Thủ', icon: '💎' }, rankPoints: 2180, rankWins: 48, rankLosses: 15, charId: 'madara' },
-                  { rank: 3, displayName: 'ShadowStrike', rankTier: { name: 'Cao Thủ', icon: '💎' }, rankPoints: 2020, rankWins: 42, rankLosses: 16, charId: 'himeko' },
-                  { rank: 4, displayName: 'KasumiWave', rankTier: { name: 'Kim Cương', icon: '🔷' }, rankPoints: 1890, rankWins: 38, rankLosses: 19, charId: 'satoshi' },
-                  { rank: 5, displayName: 'ElectroVolt', rankTier: { name: 'Kim Cương', icon: '🔷' }, rankPoints: 1750, rankWins: 35, rankLosses: 18, charId: 'madara' },
+                {(rankedPlayers.length > 0 ? rankedPlayers.slice(0, 10) : [
+                  { rank: 1, displayName: 'DragonMaster', tierName: 'Thách Đấu', tierIcon: '🔥', color: '#ec4899', rankPoints: 3450, rankWins: 86, rankLosses: 11, characterId: 'satoshi' },
+                  { rank: 2, displayName: 'PikaPro_VN', tierName: 'Đại Cao Thủ', tierIcon: '⚡', color: '#f43f5e', rankPoints: 2880, rankWins: 72, rankLosses: 15, characterId: 'madara' },
+                  { rank: 3, displayName: 'ShadowStrike', tierName: 'Cao Thủ', tierIcon: '👑', color: '#a855f7', rankPoints: 2420, rankWins: 58, rankLosses: 16, characterId: 'himeko' },
+                  { rank: 4, displayName: 'KasumiWave', tierName: 'Kim Cương', tierIcon: '💎', color: '#38bdf8', rankPoints: 1890, rankWins: 45, rankLosses: 19, characterId: 'kasumi' },
+                  { rank: 5, displayName: 'ElectroVolt', tierName: 'Bạch Kim', tierIcon: '💠', color: '#2dd4bf', rankPoints: 1250, rankWins: 35, rankLosses: 18, characterId: 'paladin' },
                 ]).map((item: any, idx: number) => {
                   const wins = item.rankWins || 0
                   const losses = item.rankLosses || 0
                   const total = wins + losses
                   const winRate = total > 0 ? `${Math.round((wins / total) * 100)}%` : '65%'
+                  const tierColor = item.color || '#facc15'
+                  const tierIcon = item.tierIcon || item.rankTier?.icon || '⭐'
+                  const tierName = item.tierName || item.rankTier?.name || 'Vàng'
+                  const charId = item.characterId || item.charId || 'satoshi'
+
                   return (
                     <tr key={idx}>
                       <td>
@@ -4282,7 +4820,7 @@ export function MirrorRushGame() {
                       <td className="lb-avatar-cell">
                         <div className="lb-avatar-rect">
                           <CharacterAvatar
-                            characterId={item.charId || 'satoshi'}
+                            characterId={charId}
                             emotion="idle"
                             size="sm"
                             shape="rect"
@@ -4294,15 +4832,26 @@ export function MirrorRushGame() {
                         <strong style={{ color: '#f8fafc' }}>{item.displayName || item.username}</strong>
                       </td>
                       <td>
-                        <span style={{ fontWeight: 800, color: '#facc15' }}>
-                          {item.rankTier?.icon || '⭐'} {item.rankTier?.name || 'Vàng'}
+                        <span
+                          className="rank-tier-badge-pill"
+                          style={{
+                            color: tierColor,
+                            borderColor: tierColor,
+                            background: 'rgba(15, 23, 42, 0.85)',
+                          }}
+                        >
+                          <span style={{ fontSize: '13px' }}>{tierIcon}</span>
+                          <span>{tierName}</span>
                         </span>
                       </td>
                       <td>
                         <strong style={{ color: '#38bdf8' }}>{item.rankPoints?.toLocaleString()} RP</strong>
                       </td>
                       <td>
-                        <span style={{ color: '#4ade80', fontWeight: 700 }}>{winRate}</span>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                          <span style={{ color: '#4ade80', fontWeight: 800, fontSize: '13px' }}>{winRate}</span>
+                          <span style={{ color: '#94a3b8', fontSize: '10.5px' }}>{wins}T - {losses}B</span>
+                        </div>
                       </td>
                     </tr>
                   )
@@ -4311,6 +4860,313 @@ export function MirrorRushGame() {
             </table>
           </div>
         </div>
+
+        {renderSharedModals()}
+      </main>
+    )
+  }
+
+  /* ══════════════════════════════════════════════
+     SCREEN: CAMPAIGN MODE (CHIẾN DỊCH 5 CHƯƠNG)
+     ══════════════════════════════════════════════ */
+  const renderCampaignSelectPage = () => {
+    const curChapter = getChapterById(campaignChapterId) || CAMPAIGN_CHAPTERS[0]
+
+    return (
+      <main className={`pikachu-app ui-scale-${uiScale}`} style={{ position: 'relative', overflowX: 'hidden' }}>
+        {/* Top Navigation Bar */}
+        <header className="top-nav-bar">
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <button
+              className="btn-back-menu"
+              onClick={() => navigateToLobbyScreen('menu', 'Đang quay lại Menu chính...')}
+              title="Quay lại Menu chính"
+            >
+              <ArrowLeft size={14} />
+              <span>Menu</span>
+            </button>
+            <div className="game-mode-tag" style={{ background: 'linear-gradient(90deg, #f59e0b, #ef4444)', color: '#ffffff', fontWeight: 900 }}>
+              👑 CHIẾN DỊCH 5 CHƯƠNG · TRẢM BOSS
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <button
+              className="settings-icon-btn"
+              onClick={cycleUiScale}
+              title={`Kích thước hiển thị: ${uiScale.toUpperCase()}`}
+            >
+              <Maximize2 size={13} color="#38bdf8" />
+              <span style={{ fontSize: '10px', fontWeight: 800, color: '#38bdf8' }}>{uiScale.toUpperCase()}</span>
+            </button>
+            <div className="coins-badge">
+              <Coins size={14} color="#facc15" />
+              <span>{coins.toLocaleString()} Xu</span>
+            </div>
+          </div>
+        </header>
+
+        <div className="campaign-container" style={{ padding: '8px 12px 24px' }}>
+          {/* Header Card */}
+          <div className="campaign-header-card">
+            <div className="campaign-title-group">
+              <span className="campaign-title-icon">⚔️</span>
+              <div>
+                <h1 className="campaign-main-title" style={{ margin: 0 }}>
+                  CHIẾN DỊCH HUYỀN THOẠI · ĐẠI CHIẾN 15 ĐẠI BOSS
+                </h1>
+                <div className="campaign-sub-title">
+                  5 Chương Cốt Truyện Bi Tráng · 5 Hiệu Ứng Môi Trường Thị Giác Riêng Biệt
+                </div>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+              <div style={{
+                background: 'rgba(0,0,0,0.4)',
+                border: '1px solid rgba(250,204,21,0.3)',
+                borderRadius: '10px',
+                padding: '6px 14px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px'
+              }}>
+                <span style={{ fontSize: '12px', color: '#94a3b8' }}>Tiến độ:</span>
+                <strong style={{ color: '#facc15', fontSize: '13px' }}>
+                  {Object.keys(campaignProgress).length}/15 Ải
+                </strong>
+              </div>
+            </div>
+          </div>
+
+          {/* 5 Chapter Navigation Tabs */}
+          <div className="campaign-tabs-row">
+            {CAMPAIGN_CHAPTERS.map(ch => {
+              const isActive = ch.id === campaignChapterId
+              const clearedCount = ch.stages.filter(st => campaignProgress[st.stageId]).length
+              return (
+                <button
+                  key={ch.id}
+                  className={`campaign-tab-btn ${isActive ? 'active' : ''}`}
+                  onClick={() => triggerLoadingTransition(`Đang tải ${ch.title}...`, () => setCampaignChapterId(ch.id), 350)}
+                  style={{
+                    ['--tab-accent' as any]: ch.accentColor,
+                    ['--tab-glow' as any]: ch.glowColor,
+                  }}
+                >
+                  <span className="campaign-tab-badge">{ch.badge}</span>
+                  <div className="campaign-tab-text">
+                    <span className="campaign-tab-name">{ch.title.split(':')[0]}</span>
+                    <span className="campaign-tab-desc" style={{ color: isActive ? ch.accentColor : '#94a3b8' }}>
+                      {clearedCount}/3 Ải Đã Chinh Phục
+                    </span>
+                  </div>
+                </button>
+              )
+            })}
+          </div>
+
+          {/* Active Chapter Overview Box */}
+          <div
+            className="chapter-banner-box"
+            style={{
+              background: curChapter.bgGradient,
+              borderColor: curChapter.accentColor,
+              boxShadow: `0 8px 30px ${curChapter.glowColor}`,
+            }}
+          >
+            <div className="chapter-banner-top">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <span style={{ fontSize: '24px' }}>{curChapter.badge}</span>
+                <div>
+                  <h2 style={{ margin: 0, fontSize: '17px', fontWeight: 900, color: '#ffffff' }}>
+                    {curChapter.title}: {curChapter.subtitle}
+                  </h2>
+                  <div className="chapter-location-tag" style={{ display: 'inline-block', marginTop: '4px' }}>
+                    📍 {curChapter.locationName}
+                  </div>
+                </div>
+              </div>
+
+              <div style={{
+                background: 'rgba(0,0,0,0.5)',
+                border: '1px solid rgba(255,255,255,0.15)',
+                borderRadius: '10px',
+                padding: '6px 12px',
+                fontSize: '11.5px',
+                color: '#facc15',
+                fontWeight: 800,
+              }}>
+                🎁 Thưởng Chương: +{curChapter.completionRewardCoins} Xu & {curChapter.completionRewardTitle}
+              </div>
+            </div>
+
+            <p className="chapter-story-desc" style={{ margin: '6px 0 0' }}>
+              {curChapter.storySummary}
+            </p>
+          </div>
+
+          {/* 3 Stage Boss Cards Grid */}
+          <div className="campaign-stages-grid">
+            {curChapter.stages.map((stage) => {
+              const isCleared = !!campaignProgress[stage.stageId]
+              const isUnlocked = stage.stageId === 1 || !!campaignProgress[stage.stageId - 1]
+
+              return (
+                <div
+                  key={stage.stageId}
+                  className={`boss-stage-card ${!isUnlocked ? 'is-locked' : ''}`}
+                >
+                  <div className="boss-card-header">
+                    <span className="boss-stage-badge">ẢI {stage.stageId}</span>
+                    {isCleared ? (
+                      <span className="boss-status-badge cleared">⭐ ĐÃ CHINH PHỤC</span>
+                    ) : isUnlocked ? (
+                      <span className="boss-status-badge ready">⚔️ SẴN SÀNG</span>
+                    ) : (
+                      <span className="boss-status-badge" style={{ background: 'rgba(148,163,184,0.15)', color: '#94a3b8' }}>
+                        🔒 CẦN QUA ẢI {stage.stageId - 1}
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="boss-profile-row">
+                    <div className="boss-grand-avatar-frame" style={{ '--chapter-glow': curChapter.accentColor } as React.CSSProperties}>
+                      <div className="boss-grand-aura" />
+                      <img
+                        src={getSpriteUrl(stage.bossPokemonId, 'artwork')}
+                        alt={stage.bossName}
+                        className="boss-grand-artwork"
+                        loading="lazy"
+                        onError={(e) => {
+                          (e.currentTarget as HTMLElement).style.display = 'none'
+                          if (e.currentTarget.nextElementSibling) {
+                            (e.currentTarget.nextElementSibling as HTMLElement).style.display = 'flex'
+                          }
+                        }}
+                      />
+                      <div className="boss-card-avatar-fallback" style={{ display: 'none' }}>{stage.bossAvatar}</div>
+                    </div>
+                    <div className="boss-profile-info">
+                      <div className="boss-power-tag">
+                        <span className="boss-power-icon">⚡</span>
+                        <span className="boss-power-text">LỰC CHIẾN: {stage.powerLevel.toLocaleString('vi-VN')}</span>
+                      </div>
+                      <div className="boss-profile-name" title={stage.bossName}>{stage.bossName}</div>
+                      <div className="boss-profile-title">{stage.title}</div>
+                      <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '3px' }}>
+                        ⏱️ Giới hạn: {stage.targetTime}s · Tốc độ đánh: {(stage.moveDelayMin / 1000).toFixed(1)}s
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="boss-quote-box">
+                    "{stage.quote}"
+                  </div>
+
+                  <div className="boss-mechanic-box">
+                    <span style={{ fontSize: '15px' }}>{stage.bossSkillIcon}</span>
+                    <div>
+                      <strong>{stage.bossSkillName}:</strong> {stage.bossSkillDesc}
+                    </div>
+                  </div>
+
+                  <div className="boss-card-footer">
+                    <div className="boss-reward-pill">
+                      <Coins size={14} color="#facc15" />
+                      <span>+{stage.rewardCoins} Xu</span>
+                    </div>
+
+                    <button
+                      className="boss-battle-btn"
+                      disabled={!isUnlocked}
+                      onClick={() => setStoryModalStage(stage)}
+                    >
+                      <span>CỐT TRUYỆN & VÀO TRẬN</span>
+                      <ArrowRight size={14} />
+                    </button>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+
+        {/* Story Dialogue Modal Before Stage Begins */}
+        {storyModalStage && (
+          <div className="story-dialogue-modal-overlay" onClick={() => setStoryModalStage(null)}>
+            <div className="story-dialogue-modal" onClick={e => e.stopPropagation()}>
+              <div className="story-modal-header">
+                <div className="story-modal-grand-avatar-box" style={{ '--chapter-glow': curChapter.accentColor } as React.CSSProperties}>
+                  <div className="story-boss-aura-ring" />
+                  <img
+                    src={getSpriteUrl(storyModalStage.bossPokemonId, 'artwork')}
+                    alt={storyModalStage.bossName}
+                    className="story-modal-grand-artwork"
+                    onError={(e) => {
+                      (e.currentTarget as HTMLElement).style.display = 'none'
+                      if (e.currentTarget.nextElementSibling) {
+                        (e.currentTarget.nextElementSibling as HTMLElement).style.display = 'flex'
+                      }
+                    }}
+                  />
+                  <div className="story-modal-avatar-fallback" style={{ display: 'none' }}>{storyModalStage.bossAvatar}</div>
+                </div>
+                <div className="story-modal-title-group">
+                  <span className="story-modal-stage-num">ẢI {storyModalStage.stageId} · {storyModalStage.name}</span>
+                  <div className="story-modal-boss-name">{storyModalStage.bossName}</div>
+                  <div className="story-modal-boss-title">{storyModalStage.title}</div>
+                  <div className="story-boss-power-pill">
+                    🔥 LỰC CHIẾN HUYỀN THOẠI: {storyModalStage.powerLevel.toLocaleString('vi-VN')}
+                  </div>
+                </div>
+              </div>
+
+              <div className="story-modal-body">
+                <div className="story-modal-intro">
+                  📖 {storyModalStage.storylineIntro}
+                </div>
+
+                <div className="story-modal-dialogue">
+                  💬 <strong>{storyModalStage.bossName}:</strong> "{storyModalStage.dialoguePreMatch}"
+                </div>
+
+                <div className="story-modal-skill-warning">
+                  <span style={{ fontSize: '20px' }}>{storyModalStage.bossSkillIcon}</span>
+                  <div>
+                    <strong style={{ color: '#ffffff' }}>Tuyệt Kỹ Boss: {storyModalStage.bossSkillName}</strong>
+                    <div style={{ color: '#cbd5e1', fontSize: '11px', marginTop: '1px' }}>
+                      {storyModalStage.bossSkillDesc} (Tung chiêu mỗi {storyModalStage.bossSkillInterval}s)
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px', color: '#94a3b8', paddingTop: '4px' }}>
+                  <span>⏱️ Thời gian: <strong style={{ color: '#f8fafc' }}>{storyModalStage.targetTime}s</strong></span>
+                  <span>🎁 Phần thưởng: <strong style={{ color: '#facc15' }}>+{storyModalStage.rewardCoins} Xu</strong></span>
+                </div>
+              </div>
+
+              <div className="story-modal-actions">
+                <button
+                  className="action-btn"
+                  style={{ background: 'rgba(255,255,255,0.1)', color: '#f8fafc', border: '1px solid rgba(255,255,255,0.2)' }}
+                  onClick={() => setStoryModalStage(null)}
+                >
+                  Đóng
+                </button>
+                <button
+                  className="boss-battle-btn"
+                  style={{ padding: '10px 22px', fontSize: '13px' }}
+                  onClick={() => startCampaignMatch(storyModalStage)}
+                >
+                  <span>⚔️ VÀO TRẬN KHIÊU CHIẾN</span>
+                  <Play size={15} />
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {renderSharedModals()}
       </main>
@@ -4329,8 +5185,12 @@ export function MirrorRushGame() {
       return renderRankedArenaPage()
     }
 
+    if (activeLobbyScreen === 'campaign') {
+      return renderCampaignSelectPage()
+    }
+
     return (
-      <main className="pikachu-app" style={{ position: 'relative', overflowX: 'hidden' }}>
+      <main className={`pikachu-app ui-scale-${uiScale}`} style={{ position: 'relative', overflowX: 'hidden' }}>
         {/* Portrait Orientation Suggestion Banner - Mobile Only */}
         {showPortraitBanner && (
           <div className="portrait-orientation-banner">
@@ -4417,6 +5277,14 @@ export function MirrorRushGame() {
                 title="Bật / Tắt Avatar Video Nhân Vật Động"
               >
                 <span>Avatar: <strong>{useVideoAvatar ? 'VIDEO 🎬' : 'PIXEL'}</strong></span>
+              </button>
+              <button
+                className="btn-bgm-toggle btn-scale-toggle"
+                onClick={cycleUiScale}
+                title="Tùy chỉnh thu phóng hiển thị (Tự động / 100% / 90% / 85% / 75%) - Tối ưu cho Laptop, iPad và màn hình bé"
+              >
+                <Maximize2 size={14} color="#facc15" />
+                <span>Thu Phóng: <strong style={{ color: '#facc15' }}>{uiScale === 'auto' ? 'Tự Động 📱' : `${uiScale}%`}</strong></span>
               </button>
               <button
                 className="btn-bgm-toggle"
@@ -4575,8 +5443,7 @@ export function MirrorRushGame() {
                     onClick={() => {
                       setPreviewCharId(selectedCharacterId)
                       setPreviewEmotion('idle')
-                      playSound('select', soundEnabled)
-                      setActiveLobbyScreen('character-select')
+                      navigateToLobbyScreen('character-select', 'Đang mở trang Chọn Tướng & Tuyệt Kỹ...')
                     }}
                   >
                     <span>👾</span>
@@ -4610,8 +5477,7 @@ export function MirrorRushGame() {
                   className="btn-ranked-queue"
                   style={{ padding: '10px 20px' }}
                   onClick={() => {
-                    playSound('select', soundEnabled)
-                    setActiveLobbyScreen('ranked')
+                    navigateToLobbyScreen('ranked', 'Đang vào Đấu Trường Xếp Hạng...')
                   }}
                 >
                   <span style={{ fontSize: '14px', fontWeight: 900 }}>⚔️ VÀO ĐẤU RANK</span>
@@ -4619,11 +5485,76 @@ export function MirrorRushGame() {
               </div>
             </div>
 
+            {/* CỔNG VÀO CHIẾN DỊCH 5 CHƯƠNG TRẢM BOSS */}
+            <div
+              style={{
+                background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.2) 0%, rgba(239, 68, 68, 0.25) 50%, rgba(168, 85, 247, 0.2) 100%)',
+                backdropFilter: 'blur(10px)',
+                WebkitBackdropFilter: 'blur(10px)',
+                border: '2px solid rgba(250, 204, 21, 0.5)',
+                borderRadius: '20px',
+                padding: '16px 20px',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                boxShadow: '0 10px 25px rgba(239, 68, 68, 0.2)',
+                position: 'relative',
+                overflow: 'hidden',
+                flexWrap: 'wrap',
+                gap: '12px',
+                marginBottom: '16px',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                <div style={{
+                  fontSize: '34px',
+                  background: 'rgba(0,0,0,0.4)',
+                  width: '60px',
+                  height: '60px',
+                  borderRadius: '14px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  border: '1.5px solid rgba(250,204,21,0.5)',
+                  boxShadow: '0 0 16px rgba(250,204,21,0.3)',
+                }}>
+                  👑
+                </div>
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <strong style={{ fontSize: '16px', color: '#ffffff', letterSpacing: '0.03em' }}>
+                      CHIẾN DỊCH 5 CHƯƠNG · TRẢM BOSS
+                    </strong>
+                    <span style={{ fontSize: '10px', background: '#ef4444', color: '#ffffff', padding: '2px 7px', borderRadius: '4px', fontWeight: 800 }}>
+                      MỚI
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '12.5px', color: '#fde047', marginTop: '3px' }}>
+                    15 Ải Cốt Truyện Bi Tráng · 5 Hiệu Ứng Môi Trường Thị Giác · Đại Chiến Boss!
+                  </div>
+                </div>
+              </div>
+
+              <button
+                className="btn-ranked-queue"
+                style={{
+                  padding: '10px 20px',
+                  background: 'linear-gradient(135deg, #f59e0b, #ef4444)',
+                  boxShadow: '0 4px 15px rgba(239, 68, 68, 0.4)',
+                }}
+                onClick={() => {
+                  navigateToLobbyScreen('campaign', 'Đang mở Chiến Dịch 5 Chương Trảm Boss...')
+                }}
+              >
+                <span style={{ fontSize: '14px', fontWeight: 900 }}>⚔️ VÀO CHIẾN DỊCH</span>
+              </button>
+            </div>
+
             <div className="lobby-card-section">
               <div className="lobby-section-title">
                 <Sparkles size={15} /> CHẾ ĐỘ CHƠI TÙY CHỌN
               </div>
-              <div className="mode-grid-3">
+              <div className="mode-grid-3" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))' }}>
                 <button
                   className={`lobby-option-btn ${playMode === 'solo' ? 'active' : ''}`}
                   onClick={() => setPlayMode('solo')}
@@ -4647,42 +5578,231 @@ export function MirrorRushGame() {
                   <Users size={22} color="#facc15" />
                   <strong>PVP 2 Người</strong>
                 </button>
+
+                <button
+                  className={`lobby-option-btn ${playMode === 'campaign' ? 'active' : ''}`}
+                  onClick={() => {
+                    navigateToLobbyScreen('campaign', 'Đang mở Chiến Dịch 5 Chương Trảm Boss...')
+                  }}
+                  style={{ borderColor: 'rgba(250, 204, 21, 0.5)' }}
+                >
+                  <Crown size={22} color="#f59e0b" />
+                  <strong style={{ color: '#facc15' }}>Chiến Dịch (5 Chương)</strong>
+                </button>
               </div>
             </div>
 
             {playMode === 'pvp-bot' && (
-              <div className="lobby-card-section">
-                <div className="lobby-section-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span><Bot size={15} color="#38bdf8" /> CHỌN CẤP ĐỘ BOT (15 CẤP ĐỘ)</span>
-                  <span style={{ fontSize: '11px', color: '#facc15', fontWeight: 700 }}>
-                    Tiến độ: Cấp {maxUnlockedBotLevel}/15
+              <div className="lobby-card-section bot-mode-section">
+                <div className="lobby-section-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Bot size={16} color="#38bdf8" />
+                    <span>ĐẤU VỚI MÁY · 50 CẤP ĐỘ (5 TẦNG)</span>
                   </span>
+                  <div className="bot-total-stars-badge">
+                    <span>⭐ Tổng Sao: </span>
+                    <strong style={{ color: '#facc15' }}>{totalBotStars} / 150</strong>
+                    <span style={{ color: '#94a3b8', fontSize: '11px', marginLeft: '6px' }}>
+                      (Mở khóa: Lv.{maxUnlockedBotLevel}/50)
+                    </span>
+                  </div>
                 </div>
-                <div className="bot-level-grid">
-                  {BOT_LEVELS.map(bot => {
-                    const isUnlocked = bot.level <= maxUnlockedBotLevel
-                    const isSelected = botLevel === bot.level
+
+                {/* Floor Tabs / Pages */}
+                <div className="bot-floor-tabs">
+                  {BOT_FLOORS.map(f => {
+                    const isFloorUnlocked = totalBotStars >= f.requiredStars
+                    const isTabActive = selectedBotFloor === f.floor
+                    let floorEarnedStars = 0
+                    for (let lvl = f.levelRange[0]; lvl <= f.levelRange[1]; lvl++) {
+                      floorEarnedStars += (botStars[lvl] || 0)
+                    }
+                    const maxFloorStars = (f.levelRange[1] - f.levelRange[0] + 1) * 3
+
                     return (
                       <button
-                        key={bot.level}
-                        disabled={!isUnlocked}
-                        className={`bot-level-card ${isSelected ? 'active' : ''} ${!isUnlocked ? 'locked' : ''}`}
-                        onClick={() => isUnlocked && setBotLevel(bot.level)}
-                        title={isUnlocked ? `${bot.name} (${bot.title}) - Thưởng: +${bot.rewardCoins} Xu` : `Cần thắng Cấp ${bot.level - 1} để mở khóa`}
+                        key={f.floor}
+                        type="button"
+                        className={`bot-floor-tab ${isTabActive ? 'active' : ''} ${!isFloorUnlocked ? 'floor-locked' : ''}`}
+                        onClick={() => setSelectedBotFloor(f.floor)}
+                        style={{
+                          borderColor: isTabActive ? f.accentColor : undefined,
+                        }}
                       >
-                        <div className="bot-level-header">
-                          <span className="bot-level-badge">Lv.{bot.level}</span>
-                          {!isUnlocked && <Lock size={12} color="#94a3b8" />}
+                        <div className="bot-floor-tab-top">
+                          <span className="bot-floor-badge">{f.badge}</span>
+                          <span className="bot-floor-tab-name">{f.name}</span>
+                          {!isFloorUnlocked && <Lock size={11} color="#f87171" />}
                         </div>
-                        <div className="bot-level-avatar">{bot.avatar}</div>
-                        <div className="bot-level-name">{bot.name}</div>
-                        <div className="bot-level-reward">
-                          <Coins size={11} color="#facc15" /> +{bot.rewardCoins}
+                        <div className="bot-floor-tab-bottom">
+                          {isFloorUnlocked ? (
+                            <span className="bot-floor-star-count">⭐ {floorEarnedStars}/{maxFloorStars}</span>
+                          ) : (
+                            <span className="bot-floor-req-stars">Cần {f.requiredStars} ⭐</span>
+                          )}
                         </div>
                       </button>
                     )
                   })}
                 </div>
+
+                {/* Floor Info Banner */}
+                {(() => {
+                  const curFloor = BOT_FLOORS.find(f => f.floor === selectedBotFloor) || BOT_FLOORS[0]
+                  const isFloorUnlocked = totalBotStars >= curFloor.requiredStars
+                  let floorEarnedStars = 0
+                  for (let lvl = curFloor.levelRange[0]; lvl <= curFloor.levelRange[1]; lvl++) {
+                    floorEarnedStars += (botStars[lvl] || 0)
+                  }
+                  const maxFloorStars = (curFloor.levelRange[1] - curFloor.levelRange[0] + 1) * 3
+
+                  return (
+                    <div
+                      className="bot-floor-banner"
+                      style={{
+                        background: curFloor.bgGradient,
+                        borderColor: isFloorUnlocked ? curFloor.accentColor : 'rgba(239, 68, 68, 0.5)',
+                      }}
+                    >
+                      <div className="bot-floor-banner-info">
+                        <div className="bot-floor-banner-title" style={{ color: curFloor.accentColor }}>
+                          <span>{curFloor.badge} {curFloor.name}: {curFloor.title}</span>
+                          <span style={{ fontSize: '11px', color: '#cbd5e1', fontWeight: 600, marginLeft: '8px' }}>
+                            (Cấp {curFloor.levelRange[0]} - {curFloor.levelRange[1]})
+                          </span>
+                        </div>
+                        <div className="bot-floor-banner-sub">
+                          {isFloorUnlocked ? (
+                            <span style={{ color: '#4ade80' }}>
+                              ✓ Đã mở khóa tầng · Đã thu thập: <strong>{floorEarnedStars}/{maxFloorStars} ⭐</strong>
+                            </span>
+                          ) : (
+                            <span style={{ color: '#f87171', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                              <Lock size={12} /> Cần tối thiểu <strong>{curFloor.requiredStars} ⭐</strong> để mở tầng này (Còn thiếu {curFloor.requiredStars - totalBotStars} ⭐)
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Floor Pagination Controls */}
+                      <div className="bot-floor-banner-nav">
+                        <button
+                          type="button"
+                          className="bot-floor-nav-btn"
+                          disabled={selectedBotFloor <= 1}
+                          onClick={() => setSelectedBotFloor(prev => Math.max(1, prev - 1))}
+                          title="Tầng trước"
+                        >
+                          ◀ Trước
+                        </button>
+                        <span style={{ fontSize: '12px', fontWeight: 700, color: '#f8fafc', padding: '0 4px' }}>
+                          Trang {selectedBotFloor}/5
+                        </span>
+                        <button
+                          type="button"
+                          className="bot-floor-nav-btn"
+                          disabled={selectedBotFloor >= BOT_FLOORS.length}
+                          onClick={() => setSelectedBotFloor(prev => Math.min(BOT_FLOORS.length, prev + 1))}
+                          title="Tầng sau"
+                        >
+                          Sau ▶
+                        </button>
+                      </div>
+                    </div>
+                  )
+                })()}
+
+                {/* Level Grid for Current Floor */}
+                {(() => {
+                  const curFloor = BOT_FLOORS.find(f => f.floor === selectedBotFloor) || BOT_FLOORS[0]
+                  const isFloorUnlocked = totalBotStars >= curFloor.requiredStars
+                  const floorLevels = BOT_LEVELS.filter(b => b.floor === curFloor.floor)
+
+                  if (!isFloorUnlocked) {
+                    return (
+                      <div className="bot-floor-locked-notice">
+                        <Lock size={32} color="#f87171" />
+                        <div style={{ fontWeight: 800, fontSize: '15px', color: '#f87171', marginTop: '6px' }}>
+                          TẦNG {curFloor.floor} ĐANG BỊ KHÓA
+                        </div>
+                        <div style={{ fontSize: '12px', color: '#cbd5e1', maxWidth: '440px', textAlign: 'center', marginTop: '4px' }}>
+                          Bạn cần tích lũy tối thiểu <strong style={{ color: '#facc15' }}>{curFloor.requiredStars} ⭐</strong> trên toàn bộ hành trình để mở khóa Tầng này.
+                          <br />
+                          Hiện tại bạn có: <strong style={{ color: '#38bdf8' }}>{totalBotStars} ⭐</strong> (còn thiếu <strong style={{ color: '#f87171' }}>{curFloor.requiredStars - totalBotStars} ⭐</strong>).
+                        </div>
+                        <div style={{ fontSize: '11px', color: '#38bdf8', marginTop: '6px' }}>
+                          💡 Gợi ý: Hãy chơi lại các màn ở Tầng trước nhanh hơn để đạt tối đa 3 ⭐ mỗi màn!
+                        </div>
+                      </div>
+                    )
+                  }
+
+                  return (
+                    <div className="bot-level-grid">
+                      {floorLevels.map(bot => {
+                        const isUnlocked = isFloorUnlocked && bot.level <= maxUnlockedBotLevel
+                        const isSelected = botLevel === bot.level
+                        const earnedStars = botStars[bot.level] || 0
+
+                        return (
+                          <button
+                            key={bot.level}
+                            type="button"
+                            disabled={!isUnlocked}
+                            className={`bot-level-card ${isSelected ? 'active' : ''} ${!isUnlocked ? 'locked' : ''}`}
+                            onClick={() => isUnlocked && setBotLevel(bot.level)}
+                            title={
+                              isUnlocked
+                                ? `${bot.name} (${bot.title}) - Đã đạt: ${earnedStars}/3 ⭐ - Thưởng: +${bot.rewardCoins} Xu`
+                                : `Cần thắng Cấp ${bot.level - 1} để mở khóa`
+                            }
+                          >
+                            <div className="bot-level-header">
+                              <span className="bot-level-badge">Lv.{bot.level}</span>
+                              {!isUnlocked ? (
+                                <Lock size={11} color="#94a3b8" />
+                              ) : earnedStars === 3 ? (
+                                <span className="bot-level-perfect" title="Đã đạt tối đa 3 sao">👑</span>
+                              ) : null}
+                            </div>
+                            <div className="bot-level-avatar-frame">
+                              <img
+                                src={getSpriteUrl(bot.pokemonId, 'artwork')}
+                                alt={bot.name}
+                                className="bot-level-artwork"
+                                loading="lazy"
+                                onError={(e) => {
+                                  (e.currentTarget as HTMLElement).style.display = 'none'
+                                  if (e.currentTarget.nextElementSibling) {
+                                    (e.currentTarget.nextElementSibling as HTMLElement).style.display = 'block'
+                                  }
+                                }}
+                              />
+                              <div className="bot-level-emoji-fallback" style={{ display: 'none' }}>{bot.avatar}</div>
+                            </div>
+                            <div className="bot-level-name">{bot.name}</div>
+
+                            {/* 3-Star Rating Row */}
+                            <div className="bot-level-stars">
+                              {[1, 2, 3].map(starNum => (
+                                <span
+                                  key={starNum}
+                                  className={`star-icon ${earnedStars >= starNum ? 'filled' : 'empty'}`}
+                                >
+                                  {earnedStars >= starNum ? '★' : '☆'}
+                                </span>
+                              ))}
+                            </div>
+
+                            <div className="bot-level-reward">
+                              <Coins size={10} color="#facc15" /> +{bot.rewardCoins}
+                            </div>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )
+                })()}
               </div>
             )}
 
@@ -4799,7 +5919,7 @@ export function MirrorRushGame() {
      SCREEN 2: IN-GAME MATCH ARENA
      ══════════════════════════════════════════════ */
   return (
-    <main className="pikachu-app">
+    <main className={`pikachu-app ui-scale-${uiScale}`}>
       {/* Portrait Orientation Suggestion Banner - Mobile Only */}
       {showPortraitBanner && (
         <div className="portrait-orientation-banner">
@@ -4819,7 +5939,7 @@ export function MirrorRushGame() {
       )}
       {/* Top Navigation Bar: Nút Về Menu & Trạng Thái Phòng */}
       <div className="top-nav-bar">
-        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
           <button className="btn-back-menu" onClick={exitToMenu}>
             <LogOut size={14} /> Về Menu
           </button>
@@ -4847,6 +5967,14 @@ export function MirrorRushGame() {
             title="Chuyển đổi hình đại diện Video Anime sống động hoặc Pixel Cổ Điển"
           >
             <span>Avatar: <strong style={{ color: useVideoAvatar ? '#38bdf8' : '#94a3b8' }}>{useVideoAvatar ? '🎬 Video' : '👾 Pixel'}</strong></span>
+          </button>
+          <button
+            className="btn-back-menu btn-scale-toggle"
+            onClick={cycleUiScale}
+            title="Tùy chỉnh thu phóng hiển thị (Tự động / 100% / 90% / 85% / 75%) - Tối ưu cho Laptop, iPad và màn hình bé"
+          >
+            <Maximize2 size={14} color="#facc15" />
+            <span>Thu Phóng: <strong style={{ color: '#facc15' }}>{uiScale === 'auto' ? 'Tự Động 📱' : `${uiScale}%`}</strong></span>
           </button>
           <button
             className="btn-back-menu"
@@ -5032,21 +6160,32 @@ export function MirrorRushGame() {
                     />
                   </div>
 
-                  {/* Nút Chiêu Thức Hoành Tráng Siêu Đẹp */}
-                  <button
-                    className={`hero-ultimate-btn char-${curChar.id} ${canUse ? 'ready' : ''}`}
-                    onClick={triggerUltimateSkill}
-                    disabled={!canUse}
-                    title={`${curChar.ultimate.name}: ${curChar.ultimate.description}`}
-                  >
-                    <div className="hero-btn-icon-wrap">{curChar.ultimate.icon}</div>
-                    <div className="hero-btn-text-wrap">
-                      <span className="hero-btn-title">{curChar.ultimate.name}</span>
-                      <span className="hero-btn-badge">
-                        {canUse ? '🔥 BẤM ĐỂ TUNG CHIÊU!' : `Tích lũy (${energy}/${curChar.ultimate.energyCost}%)`}
-                      </span>
+                  {/* Nút Chiêu Thức Hoành Tráng Siêu Đẹp HOẶC Hộp Hiệu Ứng Đang Kích Hoạt */}
+                  {activeUltEffect ? (
+                    <div className={`hero-active-ult-box theme-${activeUltEffect.colorTheme}`}>
+                      <div className="hero-active-icon">{activeUltEffect.icon}</div>
+                      <div className="hero-active-content">
+                        <span className="hero-active-name">{activeUltEffect.name}</span>
+                        <span className="hero-active-desc">{activeUltEffect.detail}</span>
+                        <span className="hero-active-timer">Hiệu lực: <strong>{activeUltEffect.secs}s</strong></span>
+                      </div>
                     </div>
-                  </button>
+                  ) : (
+                    <button
+                      className={`hero-ultimate-btn char-${curChar.id} ${canUse ? 'ready' : ''}`}
+                      onClick={triggerUltimateSkill}
+                      disabled={!canUse}
+                      title={`${curChar.ultimate.name}: ${curChar.ultimate.description}`}
+                    >
+                      <div className="hero-btn-icon-wrap">{curChar.ultimate.icon}</div>
+                      <div className="hero-btn-text-wrap">
+                        <span className="hero-btn-title">{curChar.ultimate.name}</span>
+                        <span className="hero-btn-badge">
+                          {canUse ? '🔥 BẤM ĐỂ TUNG CHIÊU!' : `Tích lũy (${energy}/${curChar.ultimate.energyCost}%)`}
+                        </span>
+                      </div>
+                    </button>
+                  )}
 
                   <div className="hero-ult-desc-box" style={{ borderLeftColor: curChar.accentColor }}>
                     {curChar.ultimate.description}
@@ -5057,7 +6196,7 @@ export function MirrorRushGame() {
           })()}
 
           {/* CỘT TAY TRÁI KHI CHƠI BÀN CHUNG (PVP BOT HOẶC PVP ONLINE) */}
-          {playMode !== 'solo' && (
+          {playMode !== 'solo' && playMode !== 'campaign' && (
             <div className="pvp-avatar-column">
               <div className="pvp-avatar-card is-player">
                 <CharacterAvatar
@@ -5073,9 +6212,19 @@ export function MirrorRushGame() {
               <span className="pvp-avatar-name">{playerName}</span>
               <span className="pvp-avatar-score" style={{ color: '#facc15' }}>{score} đ</span>
               <span className="pvp-avatar-label is-player">BẠN</span>
+              <div className="arena-rank-badge" style={{ color: userRank.color, borderColor: userRank.color }}>
+                <span className="arena-rank-badge-icon">{userRank.icon}</span>
+                <span className="arena-rank-badge-name">{userRank.name}</span>
+                <span className="arena-rank-badge-rp">({rankPoints.toLocaleString()} RP)</span>
+              </div>
 
-              {/* Nút Tuyệt Kỹ & Năng Lượng Gọn Gàng */}
-              {(() => {
+              {/* Nút Tuyệt Kỹ & Năng Lượng Gọn Gàng HOẶC Hiệu Ứng Đang Kích Hoạt */}
+              {activeUltEffect ? (
+                <div className={`bottom-bar-active-pill theme-${activeUltEffect.colorTheme}`} style={{ marginTop: '4px', width: '88px', padding: '4px 2px' }}>
+                  <span>{activeUltEffect.icon}</span>
+                  <small style={{ fontWeight: 900, color: '#facc15' }}>{activeUltEffect.secs}s</small>
+                </div>
+              ) : (() => {
                 const curChar = getCharacterById(selectedCharacterId)
                 const canUse = energy >= curChar.ultimate.energyCost
                 return (
@@ -5097,12 +6246,7 @@ export function MirrorRushGame() {
             </div>
           )}
 
-          <div className={`board-frame ${isMeFrozen ? 'is-frozen' : ''} ${isMeFogged ? 'is-fogged' : ''} ${combo >= 2 ? 'combo-on-fire' : ''} ${equipped.boardTheme} ${equipped.boardFrame}`} style={{ flex: 1, minWidth: 0 }}>
-            {isImmune && <div className="debuff-banner" style={{ background: 'rgba(56,189,248,0.25)', color: '#38bdf8', borderColor: '#38bdf8' }}>🛡️ HÀO QUANG BẤT HOẠI (MIỄN NHIỄM HIỆU ỨNG)</div>}
-            {doubleScoreTurnsLeft > 0 && <div className="debuff-banner" style={{ background: 'rgba(250,204,21,0.25)', color: '#facc15', borderColor: '#facc15' }}>⚡ X2 ĐIỂM SỐ ({doubleScoreTurnsLeft} NƯỚC NỐI TIẾP THEO)</div>}
-            {timerFrozenUntil > Date.now() && <div className="debuff-banner" style={{ background: 'rgba(147,197,253,0.25)', color: '#bfdbfe', borderColor: '#bfdbfe' }}>❄️ ĐỒNG HỒ ĐANG NGƯNG ĐỌNG</div>}
-            {thunderRadarUntil > Date.now() && <div className="debuff-banner" style={{ background: 'rgba(234,179,8,0.25)', color: '#fde047', borderColor: '#eab308' }}>⚡ RADAR HOÀNG KIM (CHỈ ĐƯỜNG TẤT CẢ NƯỚC NỐI)</div>}
-            {solarOverdriveUntil > Date.now() && <div className="debuff-banner" style={{ background: 'rgba(239,68,68,0.25)', color: '#fca5a5', borderColor: '#ef4444' }}>🔥 SOLAR OVERDRIVE (x3 ĐIỂM & HỒI +2s MỖI NƯỚC NỐI)</div>}
+          <div className={`board-frame ${isMeFrozen ? 'is-frozen' : ''} ${isMeFogged ? 'is-fogged' : ''} ${combo >= 2 ? 'combo-on-fire' : ''} ${equipped.boardTheme} ${equipped.boardFrame} ${playMode === 'campaign' && currentCampaignStage ? `chapter-env-${currentCampaignStage.chapterEnvEffect}` : ''}`} style={{ flex: 1, minWidth: 0 }}>
             {isMeFrozen && <div className="debuff-banner">❄ BẠN ĐANG BỊ ĐÓNG BĂNG!</div>}
             {isMeFogged && <div className="debuff-banner" style={{ color: '#94a3b8', borderColor: '#94a3b8' }}>🌫 BẠN ĐANG BỊ MÙ SƯƠNG!</div>}
             {activeLaserCross && (
@@ -5132,18 +6276,30 @@ export function MirrorRushGame() {
               </div>
             )}
 
-            {playMode === 'solo' && (
+            {(playMode === 'solo' || playMode === 'campaign') && (
               <div className="board-header" style={{ justifyContent: 'space-between', padding: '8px 16px', alignItems: 'center' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <span style={{ fontSize: '13px', fontWeight: 900, color: '#f8fafc', letterSpacing: '0.04em' }}>
-                    🎮 BÀN ĐẤU SOLO
+                    {playMode === 'campaign' && currentCampaignStage ? `👑 ${currentCampaignStage.name}` : '🎮 BÀN ĐẤU SOLO'}
                   </span>
-                  <span style={{ fontSize: '11px', background: 'rgba(250,204,21,0.15)', color: '#facc15', border: '1px solid rgba(250,204,21,0.3)', borderRadius: '6px', padding: '2px 8px', fontWeight: 800 }}>
-                    {getCharacterById(selectedCharacterId).name}
+                  <span style={{ fontSize: '11px', background: playMode === 'campaign' ? 'rgba(239,68,68,0.2)' : 'rgba(250,204,21,0.15)', color: playMode === 'campaign' ? '#fca5a5' : '#facc15', border: `1px solid ${playMode === 'campaign' ? 'rgba(239,68,68,0.4)' : 'rgba(250,204,21,0.3)'}`, borderRadius: '6px', padding: '2px 8px', fontWeight: 800 }}>
+                    {playMode === 'campaign' && currentCampaignStage ? `VS ${currentCampaignStage.bossAvatar} ${currentCampaignStage.bossName}` : getCharacterById(selectedCharacterId).name}
                   </span>
                 </div>
-                {/* Nút Tuyệt Kỹ Gọn Đẹp */}
-                {(() => {
+                {/* Nút Tuyệt Kỹ Gọn Đẹp HOẶC Hiển Thị Hiệu Ứng Tuyệt Kỹ Đang Hoạt Động (Bỏ nút skill đi) */}
+                {activeUltEffect ? (
+                  <div className={`active-skill-status-pill theme-${activeUltEffect.colorTheme}`}>
+                    <div className="pill-pulse-ring" />
+                    <span className="pill-icon">{activeUltEffect.icon}</span>
+                    <div className="pill-info">
+                      <span className="pill-title">{activeUltEffect.name}</span>
+                      <span className="pill-detail">{activeUltEffect.detail}</span>
+                    </div>
+                    <div className="pill-timer-badge">
+                      <span>⏳ {activeUltEffect.secs}s</span>
+                    </div>
+                  </div>
+                ) : (() => {
                   const curChar = getCharacterById(selectedCharacterId)
                   const canUse = energy >= curChar.ultimate.energyCost
                   return (
@@ -5249,25 +6405,57 @@ export function MirrorRushGame() {
           {/* CỘT TAY PHẢI KHI CHƠI BÀN CHUNG (MÁY HOẶC ĐỐI THỦ) */}
           {playMode !== 'solo' && (
             <div className="pvp-avatar-column">
-              <div className="pvp-avatar-card is-rival">
-                <CharacterAvatar
-                  domId="rival-active-avatar"
-                  characterId={rivalCharacterId}
-                  emotion={rivalEmotion}
-                  size="sm"
-                  shape="rect"
-                  showSpeech={rivalEmotion !== 'idle'}
-                  useVideo={useVideoAvatar}
-                />
+              <div className={`pvp-avatar-card is-rival ${playMode === 'campaign' ? 'is-boss-rival' : playMode === 'pvp-bot' ? 'is-bot-rival' : ''}`}>
+                {playMode === 'campaign' && currentCampaignStage ? (
+                  <div className="arena-boss-avatar-wrapper">
+                    <div className="arena-boss-aura" />
+                    <img
+                      src={getSpriteUrl(currentCampaignStage.bossPokemonId, 'artwork')}
+                      alt={currentCampaignStage.bossName}
+                      className="arena-boss-artwork"
+                    />
+                  </div>
+                ) : playMode === 'pvp-bot' ? (
+                  <div className="arena-bot-avatar-wrapper">
+                    <img
+                      src={getSpriteUrl(curBot.pokemonId, 'artwork')}
+                      alt={curBot.name}
+                      className="arena-bot-artwork"
+                    />
+                  </div>
+                ) : (
+                  <CharacterAvatar
+                    domId="rival-active-avatar"
+                    characterId={rivalCharacterId}
+                    emotion={rivalEmotion}
+                    size="sm"
+                    shape="rect"
+                    showSpeech={rivalEmotion !== 'idle'}
+                    useVideo={useVideoAvatar}
+                  />
+                )}
               </div>
               <span className="pvp-avatar-name">
-                {playMode === 'pvp-bot' ? `${curBot.name} (Lv.${curBot.level})` : (rivalName || 'Chờ...')}
+                {playMode === 'campaign' && currentCampaignStage
+                  ? currentCampaignStage.bossName
+                  : playMode === 'pvp-bot'
+                  ? `${curBot.name} (Lv.${curBot.level})`
+                  : (rivalName || 'Chờ...')}
               </span>
               <span className="pvp-avatar-score" style={{ color: '#f43f5e' }}>{rivalScore} đ</span>
               <span className="pvp-avatar-label is-rival">
-                {playMode === 'pvp-bot' ? `MÁY (BOT)` : 'ĐỐI THỦ'}
+                {playMode === 'campaign' ? 'BOSS CỐT TRUYỆN' : playMode === 'pvp-bot' ? 'MÁY (BOT)' : 'ĐỐI THỦ'}
               </span>
-              {playMode === 'pvp-bot' && (
+              <div className="arena-rank-badge" style={{ color: activeRivalRankTier.color, borderColor: activeRivalRankTier.color }}>
+                <span className="arena-rank-badge-icon">{activeRivalRankTier.icon}</span>
+                <span className="arena-rank-badge-name">{activeRivalRankTier.name}</span>
+                <span className="arena-rank-badge-rp">({activeRivalRp.toLocaleString()} RP)</span>
+              </div>
+              {playMode === 'campaign' && currentCampaignStage ? (
+                <div className="pvp-boss-power-badge">
+                  ⚡ Lực Chiến: {currentCampaignStage.powerLevel.toLocaleString('vi-VN')}
+                </div>
+              ) : playMode === 'pvp-bot' && (
                 <div className="pvp-bot-badge">
                   {curBot.avatar} {curBot.title}
                 </div>
@@ -5294,15 +6482,15 @@ export function MirrorRushGame() {
             <span className="pvp-avatar-name">{playerName}</span>
             <span className="pvp-avatar-score" style={{ color: '#facc15' }}>{score} đ</span>
             <span className="pvp-avatar-label is-player">BẠN</span>
+            <div className="arena-rank-badge" style={{ color: userRank.color, borderColor: userRank.color }}>
+              <span className="arena-rank-badge-icon">{userRank.icon}</span>
+              <span className="arena-rank-badge-name">{userRank.name}</span>
+              <span className="arena-rank-badge-rp">({rankPoints.toLocaleString()} RP)</span>
+            </div>
           </div>
 
           {/* Cột Trái: Bảng của BẠN */}
           <div className={`board-frame ${isMeFrozen ? 'is-frozen' : ''} ${isMeFogged ? 'is-fogged' : ''} ${combo >= 2 ? 'combo-on-fire' : ''} ${equipped.boardTheme} ${equipped.boardFrame}`}>
-            {isImmune && <div className="debuff-banner" style={{ background: 'rgba(56,189,248,0.25)', color: '#38bdf8', borderColor: '#38bdf8' }}>🛡️ HÀO QUANG BẤT HOẠI (MIỄN NHIỄM)</div>}
-            {doubleScoreTurnsLeft > 0 && <div className="debuff-banner" style={{ background: 'rgba(250,204,21,0.25)', color: '#facc15', borderColor: '#facc15' }}>⚡ X2 ĐIỂM SỐ ({doubleScoreTurnsLeft} NƯỚC)</div>}
-            {timerFrozenUntil > Date.now() && <div className="debuff-banner" style={{ background: 'rgba(147,197,253,0.25)', color: '#bfdbfe', borderColor: '#bfdbfe' }}>❄️ ĐỒNG HỒ ĐANG NGƯNG ĐỌNG</div>}
-            {thunderRadarUntil > Date.now() && <div className="debuff-banner" style={{ background: 'rgba(234,179,8,0.25)', color: '#fde047', borderColor: '#eab308' }}>⚡ RADAR HOÀNG KIM (CHỈ ĐƯỜNG TẤT CẢ NƯỚC NỐI)</div>}
-            {solarOverdriveUntil > Date.now() && <div className="debuff-banner" style={{ background: 'rgba(239,68,68,0.25)', color: '#fca5a5', borderColor: '#ef4444' }}>🔥 SOLAR OVERDRIVE (x3 ĐIỂM & HỒI +2s MỖI NƯỚC NỐI)</div>}
             {isMeFrozen && <div className="debuff-banner">❄ BẠN ĐANG BỊ ĐÓNG BĂNG!</div>}
             {isMeFogged && <div className="debuff-banner" style={{ color: '#94a3b8', borderColor: '#94a3b8' }}>🌫 BỊ MÙ SƯƠNG!</div>}
             {combo >= 2 && (
@@ -5422,7 +6610,12 @@ export function MirrorRushGame() {
             </div>
 
             {/* CHIÊU THỨC CUỐI ĐẶC BIỆT CỦA NHÂN VẬT (GỌN GÀNG KHỚP CỘT PVP) */}
-            {(() => {
+            {activeUltEffect ? (
+              <div className={`bottom-bar-active-pill theme-${activeUltEffect.colorTheme}`} style={{ width: '44px', padding: '3px 1px', flexDirection: 'column', gap: '1px' }} title={`${activeUltEffect.name} (${activeUltEffect.secs}s)`}>
+                <span style={{ fontSize: '14px' }}>{activeUltEffect.icon}</span>
+                <small style={{ fontWeight: 900, color: '#facc15', fontSize: '9px' }}>{activeUltEffect.secs}s</small>
+              </div>
+            ) : (() => {
               const curChar = getCharacterById(selectedCharacterId)
               const canUse = energy >= curChar.ultimate.energyCost
               return (
@@ -5527,25 +6720,57 @@ export function MirrorRushGame() {
 
           {/* Cột Avatar Bên Phải: Nhân vật ĐỐI THỦ / MÁY */}
           <div className="pvp-avatar-column">
-            <div className="pvp-avatar-card is-rival">
-              <CharacterAvatar
-                domId="rival-active-avatar"
-                characterId={rivalCharacterId}
-                emotion={rivalEmotion}
-                size="sm"
-                shape="rect"
-                showSpeech={rivalEmotion !== 'idle'}
-                useVideo={useVideoAvatar}
-              />
+            <div className={`pvp-avatar-card is-rival ${playMode === 'campaign' ? 'is-boss-rival' : playMode === 'pvp-bot' ? 'is-bot-rival' : ''}`}>
+              {playMode === 'campaign' && currentCampaignStage ? (
+                <div className="arena-boss-avatar-wrapper">
+                  <div className="arena-boss-aura" />
+                  <img
+                    src={getSpriteUrl(currentCampaignStage.bossPokemonId, 'artwork')}
+                    alt={currentCampaignStage.bossName}
+                    className="arena-boss-artwork"
+                  />
+                </div>
+              ) : playMode === 'pvp-bot' ? (
+                <div className="arena-bot-avatar-wrapper">
+                  <img
+                    src={getSpriteUrl(curBot.pokemonId, 'artwork')}
+                    alt={curBot.name}
+                    className="arena-bot-artwork"
+                  />
+                </div>
+              ) : (
+                <CharacterAvatar
+                  domId="rival-active-avatar"
+                  characterId={rivalCharacterId}
+                  emotion={rivalEmotion}
+                  size="sm"
+                  shape="rect"
+                  showSpeech={rivalEmotion !== 'idle'}
+                  useVideo={useVideoAvatar}
+                />
+              )}
             </div>
             <span className="pvp-avatar-name">
-              {playMode === 'pvp-bot' ? `${curBot.name} (Lv.${curBot.level})` : (rivalName || 'Chờ...')}
+              {playMode === 'campaign' && currentCampaignStage
+                ? currentCampaignStage.bossName
+                : playMode === 'pvp-bot'
+                ? `${curBot.name} (Lv.${curBot.level})`
+                : (rivalName || 'Chờ...')}
             </span>
             <span className="pvp-avatar-score" style={{ color: '#f43f5e' }}>{rivalScore} đ</span>
             <span className="pvp-avatar-label is-rival">
-              {playMode === 'pvp-bot' ? 'MÁY (BOT)' : 'ĐỐI THỦ'}
+              {playMode === 'campaign' ? 'BOSS CỐT TRUYỆN' : playMode === 'pvp-bot' ? 'MÁY (BOT)' : 'ĐỐI THỦ'}
             </span>
-            {playMode === 'pvp-bot' && (
+            <div className="arena-rank-badge" style={{ color: activeRivalRankTier.color, borderColor: activeRivalRankTier.color }}>
+              <span className="arena-rank-badge-icon">{activeRivalRankTier.icon}</span>
+              <span className="arena-rank-badge-name">{activeRivalRankTier.name}</span>
+              <span className="arena-rank-badge-rp">({activeRivalRp.toLocaleString()} RP)</span>
+            </div>
+            {playMode === 'campaign' && currentCampaignStage ? (
+              <div className="pvp-boss-power-badge">
+                ⚡ Lực Chiến: {currentCampaignStage.powerLevel.toLocaleString('vi-VN')}
+              </div>
+            ) : playMode === 'pvp-bot' && (
               <div className="pvp-bot-badge">
                 {curBot.avatar} {curBot.title}
               </div>
@@ -5646,11 +6871,17 @@ export function MirrorRushGame() {
                   <div className="stage-winner-pedestal">
                     <span style={{ fontSize: '11px', fontWeight: 900, color: '#0f172a' }}>🏆 VÔ ĐỊCH (BẠN)</span>
                     <div style={{ fontSize: '12px', fontWeight: 900, color: '#fef08a' }}>{score} ĐIỂM</div>
+                    <div className="gameover-rank-tag" style={{ color: userRank.color, borderColor: userRank.color }}>
+                      <span>{userRank.icon}</span> <span>{userRank.name}</span> · <span style={{ color: '#facc15' }}>{rankPoints} RP</span>
+                    </div>
                   </div>
                 ) : (
                   <div className="stage-loser-ground">
                     <span style={{ fontSize: '10px', color: '#f43f5e', fontWeight: 800 }}>🌧️ Thua Cuộc</span>
                     <div style={{ fontSize: '11px', color: '#cbd5e1' }}>{score} đ</div>
+                    <div className="gameover-rank-tag" style={{ color: userRank.color, borderColor: userRank.color }}>
+                      <span>{userRank.icon}</span> <span>{userRank.name}</span> · <span style={{ color: '#facc15' }}>{rankPoints} RP</span>
+                    </div>
                   </div>
                 )}
               </div>
@@ -5671,6 +6902,9 @@ export function MirrorRushGame() {
                         🌧️ {playMode === 'pvp-bot' ? `${curBot.name} (MÁY)` : 'Đối Thủ'}
                       </span>
                       <div style={{ fontSize: '11px', color: '#cbd5e1' }}>{rivalScore} đ</div>
+                      <div className="gameover-rank-tag" style={{ color: activeRivalRankTier.color, borderColor: activeRivalRankTier.color }}>
+                        <span>{activeRivalRankTier.icon}</span> <span>{activeRivalRankTier.name}</span> · <span style={{ color: '#facc15' }}>{activeRivalRp} RP</span>
+                      </div>
                     </div>
                   ) : (
                     <div className="stage-winner-pedestal">
@@ -5678,6 +6912,9 @@ export function MirrorRushGame() {
                         🏆 {playMode === 'pvp-bot' ? `${curBot.name} (MÁY)` : 'ĐỐI THỦ'}
                       </span>
                       <div style={{ fontSize: '12px', fontWeight: 900, color: '#fef08a' }}>{rivalScore} ĐIỂM</div>
+                      <div className="gameover-rank-tag" style={{ color: activeRivalRankTier.color, borderColor: activeRivalRankTier.color }}>
+                        <span>{activeRivalRankTier.icon}</span> <span>{activeRivalRankTier.name}</span> · <span style={{ color: '#facc15' }}>{activeRivalRp} RP</span>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -5685,18 +6922,131 @@ export function MirrorRushGame() {
             </div>
 
             <div style={{ fontSize: '22px', fontWeight: 900, color: gameOver === 'win' ? '#facc15' : '#f43f5e' }}>
-              {gameOver === 'win' ? 'CHIẾN THẮNG HUY HOÀNG!' : 'TRẬN ĐẤU KẾT THÚC!'}
+              {gameOver === 'win'
+                ? (playMode === 'campaign'
+                    ? '👑 TRẢM BOSS THÀNH CÔNG!'
+                    : playMode === 'pvp-online'
+                    ? '🏆 BẠN ĐÃ CHIẾN THẮNG TRẬN ĐẤU!'
+                    : playMode === 'pvp-bot'
+                    ? '🏆 BẠN ĐÃ CHIẾN THẮNG MÁY!'
+                    : 'CHIẾN THẮNG HUY HOÀNG!')
+                : (playMode === 'campaign'
+                    ? '🌧️ THẤT BẠI TRƯỚC BOSS!'
+                    : playMode === 'pvp-online'
+                    ? '🌧️ BẠN ĐÃ THUA CUỘC!'
+                    : playMode === 'pvp-bot'
+                    ? '🌧️ BẠN ĐÃ THUA CUỘC!'
+                    : 'HẾT THỜI GIAN!')}
             </div>
-            <p style={{ color: '#94a3b8', fontSize: '13px', margin: '6px 0 14px' }}>
+
+            {/* Hiệu ứng Cộng Điểm Xếp Hạng & Phần Thưởng Chiến Thắng */}
+            {gameOver === 'win' && (
+              <div className="victory-reward-card-animated">
+                <div className="victory-reward-header">
+                  <span className="victory-crown">👑</span>
+                  <span className="victory-reward-title">PHẦN THƯỞNG CHIẾN THẮNG & THĂNG RANK</span>
+                </div>
+
+                {isRankUp && (
+                  <div className="rank-up-banner-animated">
+                    <span>🎉</span>
+                    <span>CHÚC MỪNG BẠN ĐÃ THĂNG HẠNG: <strong>{userRank.name.toUpperCase()}</strong>!</span>
+                    <span>✨</span>
+                  </div>
+                )}
+
+                <div className="victory-gain-row">
+                  {/* Điểm Rank RP */}
+                  <div className="victory-gain-item rp-gain">
+                    <div className="gain-label">ĐIỂM XẾP HẠNG (RP)</div>
+                    <div className="gain-value-animated rp-glow">
+                      +{lastEarnedRp || (playMode === 'pvp-online' ? 65 : 25)} RP
+                    </div>
+                    <div className="gain-tier-tag" style={{ color: userRank.color }}>
+                      {userRank.icon} {userRank.name} · {rankPoints} RP
+                    </div>
+                  </div>
+
+                  {/* Xu Thưởng */}
+                  <div className="victory-gain-item coin-gain">
+                    <div className="gain-label">XU THƯỞNG NHẬN ĐƯỢC</div>
+                    <div className="gain-value-animated coin-glow">
+                      +{lastEarnedCoins || (playMode === 'pvp-online' ? 200 : 100)} Xu
+                    </div>
+                    <div className="gain-balance-tag">
+                      💰 Ví hiện tại: {coins} Xu
+                    </div>
+                  </div>
+                </div>
+
+                {/* Thanh Tiến Độ Rank Tier */}
+                <div className="victory-rank-progress-box">
+                  <div className="victory-rank-progress-header">
+                    <span style={{ color: userRank.color, fontWeight: 900 }}>
+                      {userRank.icon} BẬC {userRank.name.toUpperCase()}
+                    </span>
+                    <span style={{ color: '#94a3b8', fontSize: '11px', fontWeight: 700 }}>
+                      {userRank.nextTierPoints ? `${rankPoints} / ${userRank.nextTierPoints} RP` : `${rankPoints} RP (Tối Thượng)`}
+                    </span>
+                  </div>
+                  <div className="victory-rank-bar-track">
+                    <div
+                      className="victory-rank-bar-fill"
+                      style={{
+                        width: userRank.nextTierPoints
+                          ? `${Math.min(100, Math.max(12, Math.round(((rankPoints - userRank.minPoints) / Math.max(1, userRank.nextTierPoints - userRank.minPoints)) * 100)))}%`
+                          : '100%',
+                        background: `linear-gradient(90deg, ${userRank.color}, #fde047)`
+                      }}
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Thông báo trừ điểm khi thua trận PVP Online */}
+            {gameOver === 'lose' && playMode === 'pvp-online' && (
+              <div className="defeat-rp-card">
+                <span style={{ color: '#f43f5e', fontWeight: 900, fontSize: '14px' }}>📉 -20 RP</span>
+                <span style={{ color: '#cbd5e1', fontSize: '12px' }}>
+                  Điểm xếp hạng: <strong style={{ color: userRank.color }}>{userRank.icon} {userRank.name} ({rankPoints} RP)</strong>
+                </span>
+              </div>
+            )}
+
+            {playMode === 'pvp-bot' && gameOver === 'win' && (
+              <div className="game-over-bot-stars-card">
+                <div className="bot-stars-rating-stars">
+                  {[1, 2, 3].map(s => (
+                    <span key={s} className={`game-over-star ${lastEarnedBotStars >= s ? 'earned' : 'missed'}`}>
+                      {lastEarnedBotStars >= s ? '★' : '☆'}
+                    </span>
+                  ))}
+                </div>
+                <div style={{ fontSize: '13px', fontWeight: 800, color: '#facc15' }}>
+                  Đạt {lastEarnedBotStars || 1}/3 Sao · Cấp {curBot.level} ({curBot.name})
+                </div>
+              </div>
+            )}
+
+            <p style={{ color: '#cbd5e1', fontSize: '13px', margin: '8px 0 16px', lineHeight: 1.5 }}>
               {gameOver === 'win'
                 ? (playMode === 'solo'
                     ? `Chúc mừng bạn đã xuất sắc hoàn thành bản đồ ván cờ với ${score} điểm!`
-                    : `Chúc mừng bạn đã xuất sắc giành chiến thắng với ${score} điểm (đối thủ: ${rivalScore} điểm)!`)
+                    : playMode === 'campaign'
+                    ? `Tuyệt vời! Bạn đã đánh bại Boss ${currentCampaignStage?.bossName || ''} (${score} vs ${rivalScore} điểm) và mở khóa ải tiếp theo!`
+                    : playMode === 'pvp-online'
+                    ? (currentRoomState?.lastAction?.type === 'leave'
+                        ? `🚪 Đối thủ đã thoát trận hoặc mất kết nối! Bạn được xử thắng trực tiếp ván đấu này!`
+                        : `🎉 Chúc mừng bạn đã hoàn thành bảng trước hoặc giành điểm số cao hơn đối thủ (${score} vs ${rivalScore} điểm)!`)
+                    : `Chúc mừng bạn đã xuất sắc giành chiến thắng trước ${curBot.name} với ${score} điểm (máy: ${rivalScore} điểm)!`)
                 : (playMode === 'solo'
                     ? `Hết thời gian mà bạn chưa hoàn thành xong bảng cờ (${score} điểm). Đừng nản lòng nhé!`
-                    : playMode === 'pvp-bot'
-                    ? `Bạn đã thua cuộc trước ${curBot.name} do thấp điểm hơn (${score} vs ${rivalScore} điểm). Hãy cố gắng ở trận sau!`
-                    : `Đối thủ đã chiến thắng với điểm số cao hơn (${rivalScore} vs ${score} điểm). Hãy phục thù ở ván tiếp theo!`)}
+                    : playMode === 'campaign'
+                    ? `Boss ${currentCampaignStage?.bossName || ''} đã giành chiến thắng (${rivalScore} vs ${score} điểm). Hãy rèn luyện để thử lại!`
+                    : playMode === 'pvp-online'
+                    ? `🌧️ Đối thủ (${rivalName || 'Đối thủ'}) đã chiến thắng (${rivalScore} vs ${score} điểm). Hãy phục thù ở trận tiếp theo!`
+                    : `Bạn đã thua cuộc trước ${curBot.name} do thấp điểm hơn (${score} vs ${rivalScore} điểm). Hãy cố gắng ở trận sau!`)}
             </p>
             <div style={{ display: 'flex', gap: '12px' }}>
               <button className="modal-btn-primary" onClick={onRestart}>CHƠI LẠI</button>

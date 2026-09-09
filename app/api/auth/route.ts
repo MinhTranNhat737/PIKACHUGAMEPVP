@@ -44,7 +44,8 @@ export async function POST(req: Request) {
       if (!username || levelToAdvance === null) {
         return NextResponse.json({ success: false, error: 'Dữ liệu không hợp lệ' }, { status: 400 })
       }
-      const res = advanceBotLevel(username, levelToAdvance)
+      const stars = typeof body.stars === 'number' ? body.stars : 1
+      const res = advanceBotLevel(username, levelToAdvance, stars)
       return NextResponse.json(res)
     }
 
@@ -53,7 +54,8 @@ export async function POST(req: Request) {
       if (!username || rp === 0) {
         return NextResponse.json({ success: false, error: 'Dữ liệu không hợp lệ' }, { status: 400 })
       }
-      const res = updateUserRankPoints(username, rp)
+      const isWin = typeof body.isWin === 'boolean' ? body.isWin : undefined
+      const res = updateUserRankPoints(username, rp, isWin)
       return NextResponse.json(res)
     }
 

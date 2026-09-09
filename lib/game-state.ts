@@ -13,28 +13,142 @@ export interface BotLevelConfig {
   level: number
   name: string
   avatar: string
+  pokemonId: number
   moveDelayMin: number // in ms
   moveDelayMax: number // in ms
   rewardCoins: number
   title: string
+  floor: number
+}
+
+export interface BotFloorConfig {
+  floor: number
+  name: string
+  title: string
+  badge: string
+  levelRange: [number, number]
+  requiredStars: number
+  accentColor: string
+  bgGradient: string
+}
+
+export const BOT_FLOORS: BotFloorConfig[] = [
+  {
+    floor: 1,
+    name: 'Tầng 1',
+    title: 'Tập Sự & Tân Thủ',
+    badge: '🌿',
+    levelRange: [1, 10],
+    requiredStars: 0,
+    accentColor: '#22c55e',
+    bgGradient: 'linear-gradient(135deg, rgba(34, 197, 94, 0.18), rgba(15, 23, 42, 0.85))',
+  },
+  {
+    floor: 2,
+    name: 'Tầng 2',
+    title: 'Chiến Binh Kanto',
+    badge: '⚡',
+    levelRange: [11, 20],
+    requiredStars: 18,
+    accentColor: '#facc15',
+    bgGradient: 'linear-gradient(135deg, rgba(250, 204, 21, 0.18), rgba(15, 23, 42, 0.85))',
+  },
+  {
+    floor: 3,
+    name: 'Tầng 3',
+    title: 'Cao Thủ Johto & Hoenn',
+    badge: '🔥',
+    levelRange: [21, 30],
+    requiredStars: 45,
+    accentColor: '#f97316',
+    bgGradient: 'linear-gradient(135deg, rgba(249, 115, 22, 0.18), rgba(15, 23, 42, 0.85))',
+  },
+  {
+    floor: 4,
+    name: 'Tầng 4',
+    title: 'Huyền Thoại Sinnoh & Unova',
+    badge: '❄️',
+    levelRange: [31, 40],
+    requiredStars: 75,
+    accentColor: '#38bdf8',
+    bgGradient: 'linear-gradient(135deg, rgba(56, 189, 248, 0.18), rgba(15, 23, 42, 0.85))',
+  },
+  {
+    floor: 5,
+    name: 'Tầng 5',
+    title: 'Thần Thoại & Sáng Tạo',
+    badge: '👑',
+    levelRange: [41, 50],
+    requiredStars: 105,
+    accentColor: '#ec4899',
+    bgGradient: 'linear-gradient(135deg, rgba(236, 72, 153, 0.18), rgba(15, 23, 42, 0.85))',
+  },
+]
+
+export function getBotFloorByLevel(level: number): BotFloorConfig {
+  return BOT_FLOORS.find(f => level >= f.levelRange[0] && level <= f.levelRange[1]) || BOT_FLOORS[0]
 }
 
 export const BOT_LEVELS: BotLevelConfig[] = [
-  { level: 1, name: 'Sâu Caterpie', avatar: '🐛', moveDelayMin: 5500, moveDelayMax: 7000, rewardCoins: 50, title: 'Tập sự' },
-  { level: 2, name: 'Chim Pidgey', avatar: '🐦', moveDelayMin: 4900, moveDelayMax: 6200, rewardCoins: 60, title: 'Học viên' },
-  { level: 3, name: 'Chuột Rattata', avatar: '🐭', moveDelayMin: 4400, moveDelayMax: 5500, rewardCoins: 70, title: 'Lanh lẹ' },
-  { level: 4, name: 'Rùa Squirtle', avatar: '🐢', moveDelayMin: 4000, moveDelayMax: 5000, rewardCoins: 80, title: 'Điềm tĩnh' },
-  { level: 5, name: 'Cáo Vulpix', avatar: '🦊', moveDelayMin: 3600, moveDelayMax: 4500, rewardCoins: 90, title: 'Tinh ranh' },
-  { level: 6, name: 'Vịt Psyduck', avatar: '🦆', moveDelayMin: 3300, moveDelayMax: 4100, rewardCoins: 100, title: 'Khó lường' },
-  { level: 7, name: 'Khỉ Mankey', avatar: '🐒', moveDelayMin: 3000, moveDelayMax: 3700, rewardCoins: 110, title: 'Hiếu chiến' },
-  { level: 8, name: 'Cá Gyarados', avatar: '🐉', moveDelayMin: 2700, moveDelayMax: 3400, rewardCoins: 125, title: 'Dữ dội' },
-  { level: 9, name: 'Ma Haunter', avatar: '👻', moveDelayMin: 2400, moveDelayMax: 3100, rewardCoins: 140, title: 'Bóng ma' },
-  { level: 10, name: 'Gengar Hắc Ám', avatar: '😈', moveDelayMin: 2100, moveDelayMax: 2800, rewardCoins: 160, title: 'Cao thủ' },
-  { level: 11, name: 'Rồng Charizard', avatar: '🔥', moveDelayMin: 1900, moveDelayMax: 2500, rewardCoins: 180, title: 'Bão lửa' },
-  { level: 12, name: 'Sấm Dragonite', avatar: '⚡', moveDelayMin: 1700, moveDelayMax: 2200, rewardCoins: 210, title: 'Sấm sét' },
-  { level: 13, name: 'Chim Articuno', avatar: '❄️', moveDelayMin: 1500, moveDelayMax: 2000, rewardCoins: 240, title: 'Băng giá' },
-  { level: 14, name: 'Chim Moltres', avatar: '🦅', moveDelayMin: 1300, moveDelayMax: 1800, rewardCoins: 270, title: 'Huyền thoại' },
-  { level: 15, name: 'Mewtwo Tối Thượng', avatar: '🔮', moveDelayMin: 1100, moveDelayMax: 1500, rewardCoins: 350, title: 'Bất khả chiến bại' },
+  // ─── TẦNG 1: TẬP SỰ & TÂN THỦ (Lv 1 - 10) ───
+  { level: 1, floor: 1, name: 'Sâu Caterpie', avatar: '🐛', pokemonId: 10, moveDelayMin: 5500, moveDelayMax: 7000, rewardCoins: 50, title: 'Tập sự' },
+  { level: 2, floor: 1, name: 'Chim Pidgey', avatar: '🐦', pokemonId: 16, moveDelayMin: 4900, moveDelayMax: 6300, rewardCoins: 60, title: 'Học viên' },
+  { level: 3, floor: 1, name: 'Chuột Rattata', avatar: '🐭', pokemonId: 19, moveDelayMin: 4400, moveDelayMax: 5600, rewardCoins: 70, title: 'Lanh lẹ' },
+  { level: 4, floor: 1, name: 'Rùa Squirtle', avatar: '🐢', pokemonId: 7, moveDelayMin: 4000, moveDelayMax: 5100, rewardCoins: 80, title: 'Điềm tĩnh' },
+  { level: 5, floor: 1, name: 'Cáo Vulpix', avatar: '🦊', pokemonId: 37, moveDelayMin: 3700, moveDelayMax: 4700, rewardCoins: 90, title: 'Tinh ranh' },
+  { level: 6, floor: 1, name: 'Bướm Butterfree', avatar: '🦋', pokemonId: 12, moveDelayMin: 3400, moveDelayMax: 4300, rewardCoins: 100, title: 'Nhẹ nhàng' },
+  { level: 7, floor: 1, name: 'Khỉ Mankey', avatar: '🐒', pokemonId: 56, moveDelayMin: 3100, moveDelayMax: 3900, rewardCoins: 110, title: 'Hiếu chiến' },
+  { level: 8, floor: 1, name: 'Vịt Psyduck', avatar: '🦆', pokemonId: 54, moveDelayMin: 2850, moveDelayMax: 3600, rewardCoins: 125, title: 'Khó lường' },
+  { level: 9, floor: 1, name: 'Cú HootHoot', avatar: '🦉', pokemonId: 163, moveDelayMin: 2600, moveDelayMax: 3300, rewardCoins: 140, title: 'Thông thái' },
+  { level: 10, floor: 1, name: 'Pikabot Sấm Sét', avatar: '⚡', pokemonId: 25, moveDelayMin: 2350, moveDelayMax: 3000, rewardCoins: 160, title: 'Thủ lĩnh Tầng 1' },
+
+  // ─── TẦNG 2: CHIẾN BINH KANTO (Lv 11 - 20) ───
+  { level: 11, floor: 2, name: 'Cá Gyarados', avatar: '🐉', pokemonId: 130, moveDelayMin: 2150, moveDelayMax: 2750, rewardCoins: 175, title: 'Cuồng nộ' },
+  { level: 12, floor: 2, name: 'Bò Tauros', avatar: '🐂', pokemonId: 128, moveDelayMin: 2000, moveDelayMax: 2550, rewardCoins: 190, title: 'Húc đổ' },
+  { level: 13, floor: 2, name: 'Bọ Scyther', avatar: '🦗', pokemonId: 123, moveDelayMin: 1880, moveDelayMax: 2400, rewardCoins: 210, title: 'Lưỡi kiếm' },
+  { level: 14, floor: 2, name: 'Độc Arbok', avatar: '🐍', pokemonId: 24, moveDelayMin: 1780, moveDelayMax: 2280, rewardCoins: 225, title: 'Bẫy độc' },
+  { level: 15, floor: 2, name: 'Ma Haunter', avatar: '👻', pokemonId: 93, moveDelayMin: 1680, moveDelayMax: 2150, rewardCoins: 240, title: 'Bóng ma' },
+  { level: 16, floor: 2, name: 'Gấu Snorlax', avatar: '🐻', pokemonId: 143, moveDelayMin: 1580, moveDelayMax: 2020, rewardCoins: 260, title: 'Trọng lượng' },
+  { level: 17, floor: 2, name: 'Thần Raichu', avatar: '⚡', pokemonId: 26, moveDelayMin: 1480, moveDelayMax: 1900, rewardCoins: 280, title: 'Tia chớp' },
+  { level: 18, floor: 2, name: 'Gengar Hắc Ám', avatar: '😈', pokemonId: 94, moveDelayMin: 1400, moveDelayMax: 1800, rewardCoins: 300, title: 'Ám ảnh' },
+  { level: 19, floor: 2, name: 'Rồng Charizard', avatar: '🔥', pokemonId: 6, moveDelayMin: 1320, moveDelayMax: 1700, rewardCoins: 330, title: 'Bão lửa' },
+  { level: 20, floor: 2, name: 'Dragonite Long Tộc', avatar: '🐲', pokemonId: 149, moveDelayMin: 1250, moveDelayMax: 1600, rewardCoins: 360, title: 'Thủ lĩnh Tầng 2' },
+
+  // ─── TẦNG 3: CAO THỦ JOHTO & HOENN (Lv 21 - 30) ───
+  { level: 21, floor: 3, name: 'Cá Sấu Feraligatr', avatar: '🐊', pokemonId: 160, moveDelayMin: 1180, moveDelayMax: 1520, rewardCoins: 390, title: 'Hàm thép' },
+  { level: 22, floor: 3, name: 'Chó Typhlosion', avatar: '🐺', pokemonId: 157, moveDelayMin: 1120, moveDelayMax: 1450, rewardCoins: 420, title: 'Hỏa diệm' },
+  { level: 23, floor: 3, name: 'Nhện Ariados', avatar: '🕷️', pokemonId: 168, moveDelayMin: 1060, moveDelayMax: 1380, rewardCoins: 450, title: 'Tơ quấn' },
+  { level: 24, floor: 3, name: 'Bọ Cạp Gligar', avatar: '🦂', pokemonId: 207, moveDelayMin: 1000, moveDelayMax: 1310, rewardCoins: 480, title: 'Độc châm' },
+  { level: 25, floor: 3, name: 'Thép Steelix', avatar: '🔩', pokemonId: 208, moveDelayMin: 950, moveDelayMax: 1250, rewardCoins: 510, title: 'Mình đồng' },
+  { level: 26, floor: 3, name: 'Khủng Long Tyranitar', avatar: '🦖', pokemonId: 248, moveDelayMin: 900, moveDelayMax: 1190, rewardCoins: 550, title: 'Bão cát' },
+  { level: 27, floor: 3, name: 'Rừng Sceptile', avatar: '🦎', pokemonId: 254, moveDelayMin: 860, moveDelayMax: 1130, rewardCoins: 590, title: 'Phi đao lá' },
+  { level: 28, floor: 3, name: 'Đầm Lầy Swampert', avatar: '🐸', pokemonId: 260, moveDelayMin: 820, moveDelayMax: 1080, rewardCoins: 630, title: 'Sóng ngầm' },
+  { level: 29, floor: 3, name: 'Salamence Long Vương', avatar: '🐲', pokemonId: 373, moveDelayMin: 780, moveDelayMax: 1030, rewardCoins: 670, title: 'Oanh tạc' },
+  { level: 30, floor: 3, name: 'Metagross Siêu Não', avatar: '🤖', pokemonId: 376, moveDelayMin: 740, moveDelayMax: 980, rewardCoins: 720, title: 'Thủ lĩnh Tầng 3' },
+
+  // ─── TẦNG 4: HUYỀN THOẠI SINNOH & UNOVA (Lv 31 - 40) ───
+  { level: 31, floor: 4, name: 'Lucario Ba Động', avatar: '🐺', pokemonId: 448, moveDelayMin: 700, moveDelayMax: 930, rewardCoins: 770, title: 'Khí công' },
+  { level: 32, floor: 4, name: 'Garchomp Phi Long', avatar: '🦈', pokemonId: 445, moveDelayMin: 660, moveDelayMax: 880, rewardCoins: 820, title: 'Vây cá mập' },
+  { level: 33, floor: 4, name: 'Băng Mamoswine', avatar: '🦣', pokemonId: 473, moveDelayMin: 630, moveDelayMax: 840, rewardCoins: 870, title: 'Voi ma mút' },
+  { level: 34, floor: 4, name: 'Điện Luxray', avatar: '🦁', pokemonId: 405, moveDelayMin: 600, moveDelayMax: 800, rewardCoins: 930, title: 'Quang lôi' },
+  { level: 35, floor: 4, name: 'Darkrai Ác Mộng', avatar: '🌑', pokemonId: 491, moveDelayMin: 570, moveDelayMax: 760, rewardCoins: 990, title: 'Ác mộng đêm' },
+  { level: 36, floor: 4, name: 'Băng Kyurem', avatar: '🧊', pokemonId: 646, moveDelayMin: 540, moveDelayMax: 720, rewardCoins: 1050, title: 'Băng hàn' },
+  { level: 37, floor: 4, name: 'Bạch Hỏa Reshiram', avatar: '🕊️', pokemonId: 643, moveDelayMin: 510, moveDelayMax: 680, rewardCoins: 1120, title: 'Bạch viêm' },
+  { level: 38, floor: 4, name: 'Hắc Lôi Zekrom', avatar: '⚡', pokemonId: 644, moveDelayMin: 480, moveDelayMax: 640, rewardCoins: 1200, title: 'Hắc lôi vân' },
+  { level: 39, floor: 4, name: 'Hải Vương Kyogre', avatar: '🐋', pokemonId: 382, moveDelayMin: 450, moveDelayMax: 600, rewardCoins: 1300, title: 'Đại hồng thủy' },
+  { level: 40, floor: 4, name: 'Địa Long Groudon', avatar: '🌋', pokemonId: 383, moveDelayMin: 420, moveDelayMax: 560, rewardCoins: 1400, title: 'Thủ lĩnh Tầng 4' },
+
+  // ─── TẦNG 5: THẦN THOẠI & SÁNG TẠO (Lv 41 - 50) ───
+  { level: 41, floor: 5, name: 'Thần Long Rayquaza', avatar: '🐉', pokemonId: 384, moveDelayMin: 390, moveDelayMax: 520, rewardCoins: 1550, title: 'Tầng bình lưu' },
+  { level: 42, floor: 5, name: 'Dị Thể Deoxys', avatar: '🧬', pokemonId: 386, moveDelayMin: 360, moveDelayMax: 480, rewardCoins: 1700, title: 'Dị biến vũ trụ' },
+  { level: 43, floor: 5, name: 'Không Gian Palkia', avatar: '🌌', pokemonId: 484, moveDelayMin: 330, moveDelayMax: 440, rewardCoins: 1850, title: 'Bẻ gãy không gian' },
+  { level: 44, floor: 5, name: 'Thời Gian Dialga', avatar: '⏳', pokemonId: 483, moveDelayMin: 310, moveDelayMax: 410, rewardCoins: 2000, title: 'Dòng thời gian' },
+  { level: 45, floor: 5, name: 'Hư Vô Giratina', avatar: '🕳️', pokemonId: 487, moveDelayMin: 290, moveDelayMax: 380, rewardCoins: 2200, title: 'Phản vật chất' },
+  { level: 46, floor: 5, name: 'Thần Biển Lugia', avatar: '🌊', pokemonId: 249, moveDelayMin: 270, moveDelayMax: 350, rewardCoins: 2400, title: 'Bão tố biển sâu' },
+  { level: 47, floor: 5, name: 'Hỏa Phượng Ho-Oh', avatar: '🌈', pokemonId: 250, moveDelayMin: 250, moveDelayMax: 330, rewardCoins: 2600, title: 'Cầu vồng hồi sinh' },
+  { level: 48, floor: 5, name: 'Mew Cội Nguồn', avatar: '🌸', pokemonId: 151, moveDelayMin: 230, moveDelayMax: 310, rewardCoins: 2800, title: 'Gen thủy tổ' },
+  { level: 49, floor: 5, name: 'Mewtwo Thức Tỉnh', avatar: '🔮', pokemonId: 150, moveDelayMin: 210, moveDelayMax: 290, rewardCoins: 3200, title: 'Bất khả chiến bại' },
+  { level: 50, floor: 5, name: 'Arceus Đấng Sáng Tạo', avatar: '👑', pokemonId: 493, moveDelayMin: 190, moveDelayMax: 260, rewardCoins: 4000, title: 'ĐẤNG SÁNG TẠO TỐI THƯỢNG' },
 ]
 
 export interface PlayerState {
@@ -68,7 +182,7 @@ export interface RoomState {
   sharedBoard?: Cell[][]
   lastAction: {
     playerId: string
-    type: 'match' | 'freeze' | 'shuffle' | 'fog' | 'scramble' | 'ultimate'
+    type: 'match' | 'freeze' | 'shuffle' | 'fog' | 'scramble' | 'ultimate' | 'timeout' | 'leave'
     charId?: string
     skillId?: string
     coordA?: Coord
@@ -95,15 +209,18 @@ export interface RankTierInfo {
   icon: string
   color: string
   minPoints: number
+  nextTierPoints?: number
 }
 
 export function getRankTier(rankPoints: number = 500): RankTierInfo {
-  if (rankPoints >= 2500) return { tier: 'Master', name: 'Cao Thủ', badge: '⚡', icon: '⚡', color: '#f43f5e', minPoints: 2500 }
-  if (rankPoints >= 1800) return { tier: 'Diamond', name: 'Kim Cương', badge: '👑', icon: '👑', color: '#a855f7', minPoints: 1800 }
-  if (rankPoints >= 1200) return { tier: 'Platinum', name: 'Bạch Kim', badge: '💎', icon: '💎', color: '#38bdf8', minPoints: 1200 }
-  if (rankPoints >= 700) return { tier: 'Gold', name: 'Vàng', badge: '🥇', icon: '🥇', color: '#facc15', minPoints: 700 }
-  if (rankPoints >= 300) return { tier: 'Silver', name: 'Bạc', badge: '🥈', icon: '🥈', color: '#94a3b8', minPoints: 300 }
-  return { tier: 'Bronze', name: 'Đồng', badge: '🥉', icon: '🥉', color: '#d97706', minPoints: 0 }
+  if (rankPoints >= 3000) return { tier: 'Challenger', name: 'Thách Đấu', badge: '🔥', icon: '🔥', color: '#ec4899', minPoints: 3000 }
+  if (rankPoints >= 2400) return { tier: 'Grandmaster', name: 'Đại Cao Thủ', badge: '⚡', icon: '⚡', color: '#f43f5e', minPoints: 2400, nextTierPoints: 3000 }
+  if (rankPoints >= 1800) return { tier: 'Master', name: 'Cao Thủ', badge: '👑', icon: '👑', color: '#a855f7', minPoints: 1800, nextTierPoints: 2400 }
+  if (rankPoints >= 1200) return { tier: 'Diamond', name: 'Kim Cương', badge: '💎', icon: '💎', color: '#38bdf8', minPoints: 1200, nextTierPoints: 1800 }
+  if (rankPoints >= 700) return { tier: 'Platinum', name: 'Bạch Kim', badge: '💠', icon: '💠', color: '#2dd4bf', minPoints: 700, nextTierPoints: 1200 }
+  if (rankPoints >= 300) return { tier: 'Gold', name: 'Vàng', badge: '🥇', icon: '🥇', color: '#facc15', minPoints: 300, nextTierPoints: 700 }
+  if (rankPoints >= 100) return { tier: 'Silver', name: 'Bạc', badge: '🥈', icon: '🥈', color: '#94a3b8', minPoints: 100, nextTierPoints: 300 }
+  return { tier: 'Bronze', name: 'Đồng', badge: '🥉', icon: '🥉', color: '#d97706', minPoints: 0, nextTierPoints: 100 }
 }
 
 // ─── MATCHMAKING QUEUE SYSTEM ───
@@ -222,6 +339,7 @@ export function getAverageQueueTimeSeconds(): number {
 export interface MatchInfoPayload {
   rivalName: string
   rivalRankTier: RankTierInfo
+  rivalRankPoints: number
   rivalCharacterId: string
   roomCode: string
   isBot: boolean
@@ -253,6 +371,7 @@ function formatMatchResult(entry: MatchmakingQueueEntry, elapsedSec: number): Ma
       match: {
         rivalName: entry.opponent.name,
         rivalRankTier: oppTier,
+        rivalRankPoints: entry.opponent.rankPoints,
         rivalCharacterId: entry.opponent.characterId,
         roomCode: entry.matchedRoomCode,
         isBot: entry.opponent.playerId.startsWith('ai_'),
@@ -334,8 +453,8 @@ export function enqueueMatchmaking(player: {
     const hostEntry = bestCandidate.joinedAt <= current.joinedAt ? bestCandidate : current
     const guestEntry = hostEntry === bestCandidate ? current : bestCandidate
 
-    const createdRoom = createRoom('', hostEntry.name, hostEntry.playerId, '14x8', 'separate')
-    joinRoom(createdRoom.code, guestEntry.name, guestEntry.playerId)
+    const createdRoom = createRoom('', hostEntry.name, hostEntry.playerId, '14x8', 'separate', hostEntry.rankPoints, hostEntry.characterId)
+    joinRoom(createdRoom.code, guestEntry.name, guestEntry.playerId, guestEntry.rankPoints, guestEntry.characterId)
 
     hostEntry.matchedRoomCode = createdRoom.code
     hostEntry.isHost = true
@@ -375,8 +494,8 @@ export function enqueueMatchmaking(player: {
     const chosenAi = aiRanks[Math.floor(Math.random() * aiRanks.length)]
     const aiId = `ai_${Date.now()}`
 
-    const createdRoom = createRoom('', current.name, current.playerId, '14x8', 'separate')
-    joinRoom(createdRoom.code, chosenAi.name, aiId)
+    const createdRoom = createRoom('', current.name, current.playerId, '14x8', 'separate', current.rankPoints, current.characterId)
+    joinRoom(createdRoom.code, chosenAi.name, aiId, chosenAi.rp, chosenAi.char)
 
     current.matchedRoomCode = createdRoom.code
     current.isHost = true
@@ -436,8 +555,8 @@ export function pollMatchmaking(playerId: string): MatchmakingResult {
     const hostEntry = bestCandidate.joinedAt <= current.joinedAt ? bestCandidate : current
     const guestEntry = hostEntry === bestCandidate ? current : bestCandidate
 
-    const createdRoom = createRoom('', hostEntry.name, hostEntry.playerId, '14x8', 'separate')
-    joinRoom(createdRoom.code, guestEntry.name, guestEntry.playerId)
+    const createdRoom = createRoom('', hostEntry.name, hostEntry.playerId, '14x8', 'separate', hostEntry.rankPoints, hostEntry.characterId)
+    joinRoom(createdRoom.code, guestEntry.name, guestEntry.playerId, guestEntry.rankPoints, guestEntry.characterId)
 
     hostEntry.matchedRoomCode = createdRoom.code
     hostEntry.isHost = true
@@ -471,8 +590,8 @@ export function pollMatchmaking(playerId: string): MatchmakingResult {
     const chosenAi = aiRanks[Math.floor(Math.random() * aiRanks.length)]
     const aiId = `ai_${Date.now()}`
 
-    const createdRoom = createRoom('', current.name, current.playerId, '14x8', 'separate')
-    joinRoom(createdRoom.code, chosenAi.name, aiId)
+    const createdRoom = createRoom('', current.name, current.playerId, '14x8', 'separate', current.rankPoints, current.characterId)
+    joinRoom(createdRoom.code, chosenAi.name, aiId, chosenAi.rp, chosenAi.char)
 
     current.matchedRoomCode = createdRoom.code
     current.isHost = true
@@ -797,7 +916,9 @@ export function createRoom(
   hostName: string,
   hostId: string,
   size: GridSizeKey = '14x8',
-  mode: BoardMode = 'separate'
+  mode: BoardMode = 'separate',
+  hostRankPoints?: number,
+  hostCharacterId?: string
 ): RoomState {
   cleanStaleRooms()
   let finalCode = code ? code.toUpperCase() : ''
@@ -821,6 +942,8 @@ export function createRoom(
     host: {
       id: hostId,
       name: hostName || 'Người chơi 1',
+      characterId: hostCharacterId || 'satoshi',
+      rankPoints: typeof hostRankPoints === 'number' ? hostRankPoints : 500,
       score: 0,
       pairsCleared: 0,
       combo: 0,
@@ -840,12 +963,20 @@ export function createRoom(
   return room
 }
 
-export function joinRoom(code: string, guestName: string, guestId: string): RoomState | { error: string } {
+export function joinRoom(
+  code: string,
+  guestName: string,
+  guestId: string,
+  guestRankPoints?: number,
+  guestCharacterId?: string
+): RoomState | { error: string } {
   const room = rooms.get(code.toUpperCase())
   if (!room) return { error: 'Không tìm thấy phòng với mã này!' }
 
   if (room.host.id === guestId) {
     room.host.name = guestName
+    if (typeof guestRankPoints === 'number') room.host.rankPoints = guestRankPoints
+    if (guestCharacterId) room.host.characterId = guestCharacterId
     room.host.lastActive = Date.now()
     room.updatedAt = Date.now()
     return room
@@ -867,6 +998,8 @@ export function joinRoom(code: string, guestName: string, guestId: string): Room
     room.guest = {
       id: guestId,
       name: guestName || 'Người chơi 2',
+      characterId: guestCharacterId || 'kasumi',
+      rankPoints: typeof guestRankPoints === 'number' ? guestRankPoints : 500,
       score: 0,
       pairsCleared: 0,
       combo: 0,
@@ -894,6 +1027,38 @@ export function joinRoom(code: string, guestName: string, guestId: string): Room
 export function getRoom(code: string): RoomState | null {
   const room = rooms.get(code.toUpperCase())
   if (!room) return null
+
+  // Tự động kiểm tra mất kết nối / thoát trận (Disconnect detection)
+  if (room.status === 'playing' && room.host && room.guest) {
+    const now = Date.now()
+    const hostInactive = (now - room.host.lastActive) > 15000
+    const guestInactive = (now - room.guest.lastActive) > 15000
+
+    if (hostInactive && !guestInactive) {
+      room.status = 'finished'
+      room.winnerId = room.guest.id
+      room.lastAction = {
+        playerId: room.host.id,
+        type: 'leave',
+        timestamp: now,
+        message: `🚪 Chủ phòng (${room.host.name}) mất kết nối / thoát trận! ${room.guest.name} ĐƯỢC XỬ THẮNG!`,
+      }
+      room.updatedAt = now
+      broadcastRoom(room)
+    } else if (guestInactive && !hostInactive) {
+      room.status = 'finished'
+      room.winnerId = room.host.id
+      room.lastAction = {
+        playerId: room.guest.id,
+        type: 'leave',
+        timestamp: now,
+        message: `🚪 Đối thủ (${room.guest.name}) mất kết nối / thoát trận! ${room.host.name} ĐƯỢC XỬ THẮNG!`,
+      }
+      room.updatedAt = now
+      broadcastRoom(room)
+    }
+  }
+
   return room
 }
 
@@ -901,7 +1066,7 @@ export function updatePlayerAction(
   code: string,
   playerId: string,
   action: {
-    type: 'match' | 'freeze' | 'scramble' | 'fog' | 'shuffle' | 'restart' | 'ultimate'
+    type: 'match' | 'freeze' | 'scramble' | 'fog' | 'shuffle' | 'restart' | 'ultimate' | 'timeout' | 'leave' | 'surrender'
     charId?: string
     coordA?: Coord
     coordB?: Coord
@@ -1118,6 +1283,17 @@ export function updatePlayerAction(
       type: 'timeout',
       timestamp: Date.now(),
       message: `⏰ Hết thời gian! Người có điểm số cao hơn (${room.host.score} vs ${guestScore}) giành chiến thắng.`,
+    }
+  } else if (action.type === 'leave' || action.type === 'surrender') {
+    if (room.status === 'playing') {
+      room.status = 'finished'
+      room.winnerId = opponent ? opponent.id : null
+      room.lastAction = {
+        playerId,
+        type: 'leave',
+        timestamp: Date.now(),
+        message: `🚪 ${player.name} đã thoát trận! ${opponent ? opponent.name : 'Đối thủ'} ĐƯỢC XỬ THẮNG!`,
+      }
     }
   } else if (action.type === 'restart') {
     const newBoard = generateBoardData(room.size)

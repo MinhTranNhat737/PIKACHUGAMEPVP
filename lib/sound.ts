@@ -107,6 +107,7 @@ export type SoundType =
   | 'slash'
   | 'arrow'
   | 'cyber'
+  | 'laser'
 
 export const playSound = (type: SoundType, enabled = true) => {
   if (!enabled) return
@@ -316,7 +317,7 @@ export const playSound = (type: SoundType, enabled = true) => {
     gain.connect(ctx.destination)
     osc.start(now)
     osc.stop(now + 0.25)
-  } else if (type === 'cyber') {
+  } else if (type === 'cyber' || type === 'laser') {
     // Cyber Overclock Matrix Laser Glitch
     const osc = ctx.createOscillator()
     const gain = ctx.createGain()

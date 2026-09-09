@@ -8,7 +8,7 @@ export const revalidate = 0
 export async function POST(req: Request) {
   try {
     const body = await req.json()
-    const { action, code, name, playerId, size, mode } = body
+    const { action, code, name, playerId, size, mode, rankPoints, characterId } = body
 
     if (action === 'create') {
       const roomCode = code || `PK${Math.floor(1000 + Math.random() * 9000)}`
@@ -17,7 +17,9 @@ export async function POST(req: Request) {
         name,
         playerId,
         (size as GridSizeKey) || '14x8',
-        (mode as BoardMode) || 'separate'
+        (mode as BoardMode) || 'separate',
+        typeof rankPoints === 'number' ? rankPoints : 500,
+        characterId || 'satoshi'
       )
       return NextResponse.json({ success: true, room })
     }
@@ -26,7 +28,13 @@ export async function POST(req: Request) {
       if (!code) {
         return NextResponse.json({ success: false, error: 'Vui lòng nhập mã phòng!' }, { status: 400 })
       }
-      const result = joinRoom(code, name, playerId)
+      const result = joinRoom(
+        code,
+        name,
+        playerId,
+        typeof rankPoints === 'number' ? rankPoints : 500,
+        characterId || 'kasumi'
+      )
       if ('error' in result) {
         return NextResponse.json({ success: false, error: result.error }, { status: 400 })
       }

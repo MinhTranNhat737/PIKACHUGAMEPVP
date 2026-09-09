@@ -4,7 +4,8 @@ export interface UserAccount {
   passwordHash: string
   displayName: string
   coins: number
-  botLevel: number // 1 to 15
+  botLevel: number // 1 to 50
+  botStars?: Record<number, number> // Map level -> 1, 2, or 3 stars
   botLevelProgress?: number
   unlockedItems: string[]
   equipped: {
@@ -15,6 +16,8 @@ export interface UserAccount {
   }
   characterId?: string
   rankPoints?: number // Điểm xếp hạng PVP Elo (Mặc định: 500)
+  rankWins?: number // Tổng số trận thắng rank
+  rankLosses?: number // Tổng số trận thua rank
   createdAt: number
   lastLogin: number
   role?: 'user' | 'admin'

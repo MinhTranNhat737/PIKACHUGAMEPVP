@@ -183,16 +183,22 @@ export function addCoinsToUser(username: string, amount: number): { success: boo
   return { success: true, coins: user.coins }
 }
 
-export function advanceBotLevel(username: string, completedLevel: number): { success: boolean; botLevel?: number } {
+export function advanceBotLevel(username: string, completedLevel: number, starsEarned: number = 1): { success: boolean; botLevel?: number; botStars?: Record<number, number> } {
   const cleanUsername = (username || '').trim().toLowerCase()
   const user = users.get(cleanUsername)
   if (!user) return { success: false }
 
-  if (completedLevel >= user.botLevel && user.botLevel < 15) {
-    user.botLevel = completedLevel + 1
-    saveUsersToFile()
+  if (!user.botStars) user.botStars = {}
+  const currentBest = user.botStars[completedLevel] || 0
+  if (starsEarned > currentBest) {
+    user.botStars[completedLevel] = starsEarned
   }
-  return { success: true, botLevel: user.botLevel }
+
+  if (completedLevel >= user.botLevel && user.botLevel < 50) {
+    user.botLevel = completedLevel + 1
+  }
+  saveUsersToFile()
+  return { success: true, botLevel: user.botLevel, botStars: user.botStars }
 }
 
 export function updateUserCharacter(username: string, characterId: string): { success: boolean; characterId?: string; user?: Omit<UserAccount, 'passwordHash'>; error?: string } {
@@ -299,42 +305,99 @@ export function adminDeleteUser(username: string): { success: boolean; error?: s
 }
 
 // ─── Ranked Matchmaking Leaderboard Functions ───
-export function updateUserRankPoints(username: string, deltaPoints: number): { success: boolean; user?: Omit<UserAccount, 'passwordHash'>; rankPoints?: number; error?: string } {
+export function updateUserRankPoints(
+  username: string,
+  deltaPoints: number,
+  isWin?: boolean
+): { success: boolean; user?: Omit<UserAccount, 'passwordHash'>; rankPoints?: number; error?: string } {
   const cleanUsername = (username || '').trim().toLowerCase()
   const user = users.get(cleanUsername)
   if (!user) return { success: false, error: 'Người dùng không tồn tại' }
-  const curRp = typeof user.rankPoints === 'number' ? user.rankPoints : 0
+  const curRp = typeof user.rankPoints === 'number' ? user.rankPoints : 500
   user.rankPoints = Math.max(0, curRp + deltaPoints)
+
+  if (isWin === true) {
+    user.rankWins = (user.rankWins || 0) + 1
+  } else if (isWin === false) {
+    user.rankLosses = (user.rankLosses || 0) + 1
+  }
+
   saveUsersToFile()
   const { passwordHash: _, ...safeUser } = user
   return { success: true, user: safeUser, rankPoints: user.rankPoints }
 }
 
+const SEED_RANK_TRAINERS = [
+  { username: 'champion_red', displayName: 'Red (Huyền Thoại)', characterId: 'satoshi', rankPoints: 3450, rankWins: 86, rankLosses: 11 },
+  { username: 'cynthia_sinnoh', displayName: 'Cynthia (Vô Địch Sinnoh)', characterId: 'himeko', rankPoints: 3120, rankWins: 72, rankLosses: 15 },
+  { username: 'steven_stone', displayName: 'Steven Stone (Vương Giả Thép)', characterId: 'madara', rankPoints: 2780, rankWins: 64, rankLosses: 18 },
+  { username: 'lance_dragon', displayName: 'Lance (Ngự Long Sư)', characterId: 'satoshi', rankPoints: 2450, rankWins: 55, rankLosses: 19 },
+  { username: 'kasumi_misty', displayName: 'Kasumi (Thần Nữ Lam Thủy)', characterId: 'kasumi', rankPoints: 2050, rankWins: 48, rankLosses: 22 },
+  { username: 'brock_pewter', displayName: 'Brock (Thủ Lĩnh Nham Thạch)', characterId: 'paladin', rankPoints: 1720, rankWins: 41, rankLosses: 24 },
+  { username: 'green_oak', displayName: 'Green Oak (Thiên Tài Kanto)', characterId: 'satoshi', rankPoints: 1380, rankWins: 35, rankLosses: 20 },
+  { username: 'volkner_spark', displayName: 'Volkner (Lôi Quang Tối Thượng)', characterId: 'madara', rankPoints: 980, rankWins: 29, rankLosses: 19 },
+]
+
 export function getRankedLeaderboard(): Array<{
+  rank: number
   username: string
   displayName: string
-  characterId?: string
+  characterId: string
   rankPoints: number
+  rankWins: number
+  rankLosses: number
   tier: string
   tierName: string
   tierIcon: string
+  tierBadge: string
   color: string
 }> {
-  return Array.from(users.values())
-    .map(u => {
-      const rp = typeof u.rankPoints === 'number' ? u.rankPoints : 0
-      const tierInfo = getRankTier(rp)
+  const map = new Map<string, {
+    username: string
+    displayName: string
+    characterId: string
+    rankPoints: number
+    rankWins: number
+    rankLosses: number
+  }>()
+
+  // Add default seed trainers first
+  for (const s of SEED_RANK_TRAINERS) {
+    map.set(s.username.toLowerCase(), s)
+  }
+
+  // Override or add registered real users
+  for (const u of users.values()) {
+    const rp = typeof u.rankPoints === 'number' ? u.rankPoints : 500
+    map.set(u.username.toLowerCase(), {
+      username: u.username,
+      displayName: u.displayName || u.username,
+      characterId: u.characterId || 'satoshi',
+      rankPoints: rp,
+      rankWins: u.rankWins || 0,
+      rankLosses: u.rankLosses || 0,
+    })
+  }
+
+  return Array.from(map.values())
+    .map(entry => {
+      const tierInfo = getRankTier(entry.rankPoints)
       return {
-        username: u.username,
-        displayName: u.displayName || u.username,
-        characterId: u.characterId || 'satoshi',
-        rankPoints: rp,
+        rank: 0,
+        username: entry.username,
+        displayName: entry.displayName,
+        characterId: entry.characterId,
+        rankPoints: entry.rankPoints,
+        rankWins: entry.rankWins,
+        rankLosses: entry.rankLosses,
         tier: tierInfo.tier,
         tierName: tierInfo.name,
         tierIcon: tierInfo.icon,
+        tierBadge: tierInfo.badge,
         color: tierInfo.color,
       }
     })
     .sort((a, b) => b.rankPoints - a.rankPoints)
+    .map((item, index) => ({ ...item, rank: index + 1 }))
 }
 
