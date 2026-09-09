@@ -8,7 +8,9 @@ export async function GET(
 ) {
   const { code } = await params
   const roomCode = code.toUpperCase()
-  const room = getRoom(roomCode)
+  const url = new URL(req.url)
+  const playerId = url.searchParams.get('playerId') || undefined
+  const room = getRoom(roomCode, playerId)
 
   if (!room) {
     return new Response('Room not found', { status: 404 })

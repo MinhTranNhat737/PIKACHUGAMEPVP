@@ -12,8 +12,16 @@ export interface AvatarSkillBeam {
   badge: string
 }
 
-function generateLightningPoints(x1: number, y1: number, x2: number, y2: number, seed: number = 0): string {
-  const segments = 9
+// Thuật toán vẽ tia chớp chân thực, xuất phát chuẩn xác từ Avatar tới mục tiêu (không loạn màn hình)
+function generateControlledLightningPoints(
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+  seed: number = 0,
+  roughness: number = 1
+): string {
+  const segments = 11
   const points: [number, number][] = [[x1, y1]]
   const dx = (x2 - x1) / segments
   const dy = (y2 - y1) / segments
@@ -26,9 +34,12 @@ function generateLightningPoints(x1: number, y1: number, x2: number, y2: number,
   for (let i = 1; i < segments; i++) {
     const basePx = x1 + dx * i
     const basePy = y1 + dy * i
-    // Pseudo random jitter based on index and seed
-    const r = Math.sin(i * 137.5 + seed * 99.3)
-    const jitter = r * Math.min(45, len * 0.22)
+    // Dùng đường cong Sine Envelope để triệt tiêu độ lệch ở 2 đầu: điểm xuất phát (Avatar) và điểm tới (ô cờ) luôn chính xác 100%
+    const envelope = Math.sin((Math.PI * i) / segments)
+    const wave1 = Math.sin(i * 2.1 + seed * 5.7)
+    const wave2 = Math.cos(i * 4.3 + seed * 3.1) * 0.4
+    const maxDisplacement = Math.min(18, Math.max(5, len * 0.05)) * roughness * envelope
+    const jitter = (wave1 + wave2) * maxDisplacement
     points.push([basePx + nx * jitter, basePy + ny * jitter])
   }
   points.push([x2, y2])
@@ -36,6 +47,19 @@ function generateLightningPoints(x1: number, y1: number, x2: number, y2: number,
 }
 
 export function AvatarSkillBeams({ beams }: { beams: AvatarSkillBeam[] }) {
+  // Trích xuất các vị trí Avatar xuất phát duy nhất để tạo hiệu ứng hào quang phóng năng lượng
+  const originPoints = useMemo(() => {
+    if (!beams || beams.length === 0) return []
+    const map = new Map<string, { x: number; y: number; element: AvatarSkillBeam['element'] }>()
+    beams.forEach(b => {
+      const key = `${Math.round(b.startX)}_${Math.round(b.startY)}_${b.element}`
+      if (!map.has(key)) {
+        map.set(key, { x: b.startX, y: b.startY, element: b.element })
+      }
+    })
+    return Array.from(map.values())
+  }, [beams])
+
   if (!beams || beams.length === 0) return null
 
   return (
@@ -133,6 +157,58 @@ export function AvatarSkillBeams({ beams }: { beams: AvatarSkillBeam[] }) {
         </linearGradient>
       </defs>
 
+      {/* ⚡ Hào quang phát năng lượng bùng nổ trực tiếp từ Avatar */}
+      {originPoints.map((op, oIdx) => {
+        if (op.element === 'electric') {
+          return (
+            <g key={`origin_${oIdx}`} className="avatar-origin-burst electric">
+              <circle cx={op.x} cy={op.y} r="42" fill="none" stroke="#facc15" strokeWidth="3.5" opacity="0.65" filter="url(#electricGlow)" />
+              <circle cx={op.x} cy={op.y} r="26" fill="url(#electricGrad)" opacity="0.5" />
+              <circle cx={op.x} cy={op.y} r="14" fill="#ffffff" opacity="0.95" />
+              <line x1={op.x - 30} y1={op.y} x2={op.x + 30} y2={op.y} stroke="#ffffff" strokeWidth="2.5" />
+              <line x1={op.x} y1={op.y - 30} x2={op.x} y2={op.y + 30} stroke="#ffffff" strokeWidth="2.5" />
+              <line x1={op.x - 20} y1={op.y - 20} x2={op.x + 20} y2={op.y + 20} stroke="#fde047" strokeWidth="2" />
+              <line x1={op.x - 20} y1={op.y + 20} x2={op.x + 20} y2={op.y - 20} stroke="#fde047" strokeWidth="2" />
+            </g>
+          )
+        }
+        if (op.element === 'fire') {
+          return (
+            <g key={`origin_${oIdx}`} className="avatar-origin-burst fire">
+              <circle cx={op.x} cy={op.y} r="46" fill="none" stroke="#f97316" strokeWidth="4" opacity="0.7" filter="blur(3px)" />
+              <circle cx={op.x} cy={op.y} r="28" fill="url(#fireGrad)" opacity="0.6" />
+              <circle cx={op.x} cy={op.y} r="15" fill="#ffffff" opacity="0.95" />
+            </g>
+          )
+        }
+        if (op.element === 'shadow') {
+          return (
+            <g key={`origin_${oIdx}`} className="avatar-origin-burst shadow">
+              <circle cx={op.x} cy={op.y} r="44" fill="none" stroke="#dc2626" strokeWidth="3" opacity="0.7" filter="blur(3px)" />
+              <circle cx={op.x} cy={op.y} r="26" fill="url(#shadowGrad)" opacity="0.65" />
+              <circle cx={op.x} cy={op.y} r="12" fill="#ef4444" opacity="0.9" />
+            </g>
+          )
+        }
+        if (op.element === 'frost') {
+          return (
+            <g key={`origin_${oIdx}`} className="avatar-origin-burst frost">
+              <circle cx={op.x} cy={op.y} r="40" fill="none" stroke="#38bdf8" strokeWidth="3" opacity="0.75" />
+              <circle cx={op.x} cy={op.y} r="22" fill="url(#frostGrad)" opacity="0.6" />
+              <circle cx={op.x} cy={op.y} r="12" fill="#ffffff" opacity="0.9" />
+            </g>
+          )
+        }
+        return (
+          <g key={`origin_${oIdx}`} className="avatar-origin-burst default">
+            <circle cx={op.x} cy={op.y} r="38" fill="none" stroke="#c026d3" strokeWidth="3" opacity="0.65" />
+            <circle cx={op.x} cy={op.y} r="20" fill="#a855f7" opacity="0.5" />
+            <circle cx={op.x} cy={op.y} r="10" fill="#ffffff" opacity="0.9" />
+          </g>
+        )
+      })}
+
+      {/* 🚀 Các tia chiêu thức chiếu từ Avatar tới các ô mục tiêu */}
       {beams.map((b, idx) => {
         const { startX, startY, targetX, targetY, element } = b
         const midX = (startX + targetX) / 2
@@ -157,30 +233,27 @@ export function AvatarSkillBeams({ beams }: { beams: AvatarSkillBeam[] }) {
         }
 
         if (element === 'electric') {
-          // ⚡ Satoshi: Sấm Sét Hoàng Kim (Zigzag Multi-Branch Lightning)
-          const pMain = generateLightningPoints(startX, startY, targetX, targetY, idx * 3)
-          const pBranch = generateLightningPoints(startX, startY, targetX, targetY, idx * 3 + 1)
-          const pThin = generateLightningPoints(startX, startY, targetX, targetY, idx * 3 + 2)
+          // ⚡ Satoshi: Sấm Sét Hoàng Kim (Chiếu tập trung từ Avatar tới các ô Pokémon)
+          const pMain = generateControlledLightningPoints(startX, startY, targetX, targetY, idx * 3, 1)
+          const pBranch = generateControlledLightningPoints(startX, startY, targetX, targetY, idx * 3 + 1, 0.6)
 
           return (
             <g key={b.id} className="beam-electric-group">
               {/* Outer Golden Aura */}
-              <path d={pMain} fill="none" stroke="#facc15" strokeWidth="8" opacity="0.45" filter="url(#electricGlow)" />
+              <path d={pMain} fill="none" stroke="#facc15" strokeWidth="7" opacity="0.55" filter="url(#electricGlow)" />
               {/* Branch Arc */}
-              <path d={pBranch} fill="none" stroke="#fde047" strokeWidth="4" opacity="0.75" />
-              {/* Thin Crackle */}
-              <path d={pThin} fill="none" stroke="#fef08a" strokeWidth="2.5" opacity="0.9" />
+              <path d={pBranch} fill="none" stroke="#fde047" strokeWidth="3.5" opacity="0.8" />
               {/* Pure White Core Bolt */}
-              <path d={pMain} fill="none" stroke="#ffffff" strokeWidth="2" />
+              <path d={pMain} fill="none" stroke="#ffffff" strokeWidth="2.2" opacity="0.95" />
 
               {/* Impact Shock Burst at target icon */}
-              <circle cx={targetX} cy={targetY} r="26" fill="#facc15" opacity="0.4" filter="url(#electricGlow)" />
-              <circle cx={targetX} cy={targetY} r="14" fill="#ffffff" opacity="0.9" />
+              <circle cx={targetX} cy={targetY} r="26" fill="#facc15" opacity="0.5" filter="url(#electricGlow)" />
+              <circle cx={targetX} cy={targetY} r="14" fill="#ffffff" opacity="0.95" />
               {/* Shockwave sparks */}
-              <line x1={targetX - 18} y1={targetY} x2={targetX + 18} y2={targetY} stroke="#ffffff" strokeWidth="2.5" />
-              <line x1={targetX} y1={targetY - 18} x2={targetX} y2={targetY + 18} stroke="#ffffff" strokeWidth="2.5" />
-              <line x1={targetX - 12} y1={targetY - 12} x2={targetX + 12} y2={targetY + 12} stroke="#fde047" strokeWidth="2" />
-              <line x1={targetX - 12} y1={targetY + 12} x2={targetX + 12} y2={targetY - 12} stroke="#fde047" strokeWidth="2" />
+              <line x1={targetX - 20} y1={targetY} x2={targetX + 20} y2={targetY} stroke="#ffffff" strokeWidth="2.5" />
+              <line x1={targetX} y1={targetY - 20} x2={targetX} y2={targetY + 20} stroke="#ffffff" strokeWidth="2.5" />
+              <line x1={targetX - 14} y1={targetY - 14} x2={targetX + 14} y2={targetY + 14} stroke="#fde047" strokeWidth="2" />
+              <line x1={targetX - 14} y1={targetY + 14} x2={targetX + 14} y2={targetY - 14} stroke="#fde047" strokeWidth="2" />
             </g>
           )
         }
@@ -259,16 +332,17 @@ export function AvatarSkillBeams({ beams }: { beams: AvatarSkillBeam[] }) {
         }
 
         if (element === 'shadow') {
-          // ⚔️ Ninja: Vô Ảnh Trảm (Shadow Shuriken & Swift Slash)
+          // ⚔️ Ninja / Madara: Vô Ảnh Trảm & Khí Cầu Susanoo (Shadow Shuriken & Swift Slash)
           return (
             <g key={b.id} className="beam-shadow-group">
-              <line x1={startX} y1={startY} x2={targetX} y2={targetY} stroke="#ef4444" strokeWidth="4" strokeDasharray="14 8" />
-              <line x1={startX} y1={startY} x2={targetX} y2={targetY} stroke="#0f172a" strokeWidth="2" />
+              <line x1={startX} y1={startY} x2={targetX} y2={targetY} stroke="#ef4444" strokeWidth="5" strokeDasharray="14 8" opacity="0.85" />
+              <line x1={startX} y1={startY} x2={targetX} y2={targetY} stroke="#7e22ce" strokeWidth="3" />
+              <line x1={startX} y1={startY} x2={targetX} y2={targetY} stroke="#ffffff" strokeWidth="1.5" />
 
               {/* Double Katana Slash X at target */}
               <line x1={targetX - 22} y1={targetY - 22} x2={targetX + 22} y2={targetY + 22} stroke="#f87171" strokeWidth="3.5" />
               <line x1={targetX - 22} y1={targetY + 22} x2={targetX + 22} y2={targetY - 22} stroke="#ffffff" strokeWidth="2.5" />
-              <circle cx={targetX} cy={targetY} r="8" fill="#ef4444" />
+              <circle cx={targetX} cy={targetY} r="9" fill="#ef4444" />
             </g>
           )
         }
@@ -311,7 +385,7 @@ export function AvatarSkillBeams({ beams }: { beams: AvatarSkillBeam[] }) {
 
         if (element === 'frost') {
           // ❄️ Frost: Băng Tuyệt Đối (Glacial Frost Ice Beam)
-          const pFrost = generateLightningPoints(startX, startY, targetX, targetY, idx * 5)
+          const pFrost = generateControlledLightningPoints(startX, startY, targetX, targetY, idx * 5, 0.7)
           return (
             <g key={b.id} className="beam-frost-group">
               <path d={pFrost} fill="none" stroke="#38bdf8" strokeWidth="7" opacity="0.5" filter="blur(3px)" />

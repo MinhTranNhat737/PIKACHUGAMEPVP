@@ -227,7 +227,7 @@ function shuffleBoard(board: Cell[][], rows: number, cols: number): Cell[][] {
 }
 
 // Thuật toán đảm bảo bàn cờ luôn luôn giải được (ít nhất 1 cặp nối hợp lệ), không bao giờ bế tắc
-function ensureSolvableBoard(board: Cell[][], rows: number, cols: number): Cell[][] {
+function ensureSolvableBoard(board: Cell[][], rows: number, cols: number, forceShuffle: boolean = false): Cell[][] {
   const remainingPositions: Coord[] = []
   const valCount = new Map<number, number>()
 
@@ -274,10 +274,10 @@ function ensureSolvableBoard(board: Cell[][], rows: number, cols: number): Cell[
     }
   }
 
-  // 2. Nếu bàn cờ hiện tại đã có ít nhất 1 cặp nối hợp lệ thì giữ nguyên
-  if (findAnyPair(current, rows, cols)) return current
+  // 2. Nếu không yêu cầu xáo trộn ép buộc (forceShuffle = false) và bàn cờ hiện tại đã có ít nhất 1 cặp nối hợp lệ thì giữ nguyên
+  if (!forceShuffle && findAnyPair(current, rows, cols)) return current
 
-  // 3. Xáo trộn ngẫu nhiên tối đa 60 lần
+  // 3. Xáo trộn ngẫu nhiên tối đa 60 lần (khi forceShuffle = true: bắt buộc xáo trộn tìm cách xếp mới)
   for (let t = 0; t < 60; t++) {
     current = shuffleBoard(current, rows, cols)
     if (findAnyPair(current, rows, cols)) {
@@ -1835,12 +1835,13 @@ export function MirrorRushGame() {
     }, 450)
   }, [gridSize, playMode, boardMode, bgmEnabled, botLevel, triggerLoadingTransition])
 
-  // Khởi động trận đấu Chiến Dịch Trảm Boss
-  const startCampaignMatch = useCallback((stage: BossStageConfig) => {
+  // Khởi động trận đấu Chiến Dịch Trảm Boss (Hỗ trợ cả 2 chế độ: Chung Bàn và Khác Bàn)
+  const startCampaignMatch = useCallback((stage: BossStageConfig, chosenMode?: BoardMode) => {
+    const activeMode = chosenMode || boardMode || 'shared'
     triggerLoadingTransition(`Đang triệu hồi Boss ${stage.bossName}...`, () => {
       setCurrentCampaignStage(stage)
       setPlayMode('campaign')
-      setBoardMode('separate')
+      setBoardMode(activeMode)
       setStoryModalStage(null)
 
       setRoomCode(null)
@@ -1855,7 +1856,11 @@ export function MirrorRushGame() {
 
       const newBoard = createLocalBoard(gridSize)
       setBoard(newBoard)
-      setRivalBoard(createLocalBoard(gridSize))
+      if (activeMode === 'shared') {
+        setRivalBoard(newBoard)
+      } else {
+        setRivalBoard(createLocalBoard(gridSize))
+      }
       setRivalName(`${stage.bossAvatar} ${stage.bossName}`)
 
       setScore(0)
@@ -1885,7 +1890,7 @@ export function MirrorRushGame() {
         startBgm()
       }
     }, 500)
-  }, [gridSize, bgmEnabled, triggerLoadingTransition])
+  }, [gridSize, bgmEnabled, triggerLoadingTransition, boardMode])
 
   // Responsive & measurement test helper: Allows URL params like ?test=pvp or ?test=solo
   useEffect(() => {
@@ -2323,7 +2328,7 @@ export function MirrorRushGame() {
     // 2. SERVER-SENT EVENTS (SSE) STREAM (Cổng 3000 chuẩn Next.js, độ trễ < 5ms)
     if (typeof window !== 'undefined' && typeof EventSource !== 'undefined') {
       try {
-        const eventSource = new EventSource(`/api/rooms/${roomCode}/stream`)
+        const eventSource = new EventSource(`/api/rooms/${roomCode}/stream?playerId=${encodeURIComponent(playerId)}`)
         eventSourceRef.current = eventSource
 
         eventSource.onopen = () => {
@@ -2356,8 +2361,8 @@ export function MirrorRushGame() {
 
     const syncRoom = async () => {
       try {
-        const sinceParam = lastSyncUpdatedAtRef.current > 0 ? `?since=${lastSyncUpdatedAtRef.current}` : ''
-        const res = await fetch(`/api/rooms/${roomCode}${sinceParam}`, {
+        const sinceParam = lastSyncUpdatedAtRef.current > 0 ? `&since=${lastSyncUpdatedAtRef.current}` : ''
+        const res = await fetch(`/api/rooms/${roomCode}?playerId=${encodeURIComponent(playerId)}${sinceParam}`, {
           cache: 'no-store',
           headers: { 'Cache-Control': 'no-cache' },
         })
@@ -2441,6 +2446,8 @@ export function MirrorRushGame() {
           playerId,
           size: '14x8', // Locked to 14x8 for fair online play
           mode: boardMode,
+          rankPoints: typeof rankPoints === 'number' ? rankPoints : 500,
+          characterId: selectedCharacterId || 'satoshi',
         }),
       })
       const data = await res.json()
@@ -2448,6 +2455,7 @@ export function MirrorRushGame() {
         setRoomCode(data.room.code)
         setIsHost(true)
         setGridSize('14x8')
+        setBoardMode(boardMode)
         setPlayMode('pvp-online')
         // BÀN ĐỂ TRỐNG: Chờ người chơi thứ 2 vào bàn mới tạo bảng mới & tính thời gian
         setBoard([])
@@ -2457,6 +2465,23 @@ export function MirrorRushGame() {
         setScore(0)
         setTimeLeft(DEFAULT_TIME) // Chưa tính thời gian!
         setGameOver(null)
+        setShufflesLeft(DEFAULT_SHUFFLES)
+        setHintsLeft(DEFAULT_HINTS)
+        setCombo(0)
+        setEnergy(0)
+        setSelected(null)
+        setLinkPath(null)
+        setHintPair(null)
+        setFrozenUntil(0)
+        setFogUntil(0)
+        setRivalFrozenUntil(0)
+        setRivalFogUntil(0)
+        setWildcardCoords([])
+        setSolarFireCoords([])
+        setElectroCoreCoords([])
+        setDoubleScoreTurnsLeft(0)
+        setImmunityUntil(0)
+        setTimerFrozenUntil(0)
         setInGame(true)
         setNotice(`ĐÃ TẠO PHÒNG [${data.room.code}] · ĐANG CHỜ NGƯỜI CHƠI THỨ 2 VÀO BÀN...`)
         playSound('hint', soundEnabled)
@@ -2492,6 +2517,8 @@ export function MirrorRushGame() {
           code: inputCode.trim().toUpperCase(),
           name: playerName || 'Khách',
           playerId,
+          rankPoints: typeof rankPoints === 'number' ? rankPoints : 500,
+          characterId: selectedCharacterId || 'kasumi',
         }),
       })
       const data = await res.json()
@@ -2510,6 +2537,30 @@ export function MirrorRushGame() {
           setBoard(room.guest!.board)
           setRivalBoard(room.host.board)
         }
+
+        // RESET SẠCH SẼ TRẠNG THÁI TRẬN ĐẤU KHI VÀO PHÒNG
+        setGameOver(null)
+        setScore(0)
+        setRivalScore(0)
+        setTimeLeft(DEFAULT_TIME)
+        setShufflesLeft(DEFAULT_SHUFFLES)
+        setHintsLeft(DEFAULT_HINTS)
+        setCombo(0)
+        setEnergy(0)
+        setSelected(null)
+        setLinkPath(null)
+        setHintPair(null)
+        setFrozenUntil(0)
+        setFogUntil(0)
+        setRivalFrozenUntil(0)
+        setRivalFogUntil(0)
+        setWildcardCoords([])
+        setSolarFireCoords([])
+        setElectroCoreCoords([])
+        setDoubleScoreTurnsLeft(0)
+        setImmunityUntil(0)
+        setTimerFrozenUntil(0)
+
         setInGame(true)
         setNotice(`ĐÃ VÀO PHÒNG [${room.code}] · CHIẾN ĐẤU!`)
         playSound('match', soundEnabled)
@@ -2795,16 +2846,18 @@ export function MirrorRushGame() {
     setSelected(null)
     setHintPair(null)
 
-    // Calculate avatar positions for projectile
+    // Calculate avatar positions for projectile directly from character sprite center
     const avatarEl = document.getElementById('player-active-avatar')
-    const avatarRect = avatarEl?.getBoundingClientRect()
-    const startX = avatarRect ? avatarRect.left + avatarRect.width / 2 : window.innerWidth * 0.25
-    const startY = avatarRect ? avatarRect.top + avatarRect.height / 2 : 120
+    const spriteEl = avatarEl?.querySelector('.character-sprite-box') || avatarEl
+    const avatarRect = (spriteEl || avatarEl)?.getBoundingClientRect()
+    const startX = avatarRect ? avatarRect.left + avatarRect.width / 2 : window.innerWidth * 0.18
+    const startY = avatarRect ? avatarRect.top + avatarRect.height / 2 : window.innerHeight * 0.35
 
     const rivalEl = document.getElementById('rival-active-avatar')
-    const rivalRect = rivalEl?.getBoundingClientRect()
-    const targetX = rivalRect ? rivalRect.left + rivalRect.width / 2 : window.innerWidth * 0.75
-    const targetY = rivalRect ? rivalRect.top + rivalRect.height / 2 : 120
+    const rivalSpriteEl = rivalEl?.querySelector('.character-sprite-box') || rivalEl
+    const rivalRect = (rivalSpriteEl || rivalEl)?.getBoundingClientRect()
+    const targetX = rivalRect ? rivalRect.left + rivalRect.width / 2 : window.innerWidth * 0.82
+    const targetY = rivalRect ? rivalRect.top + rivalRect.height / 2 : window.innerHeight * 0.35
 
     if (skill === 'freeze' && energy >= 30) {
       setEnergy(e => e - 30)
@@ -2902,11 +2955,12 @@ export function MirrorRushGame() {
       })
       setActiveSkillZaps(zaps)
 
-      // Tia chùm năng lượng từ Avatar tới các ô mục tiêu
+      // Tia chùm năng lượng xuất phát chuẩn xác từ tâm Avatar tới các ô mục tiêu
       const avatarEl = document.getElementById('player-active-avatar')
-      const avatarRect = avatarEl?.getBoundingClientRect()
-      const startX = avatarRect ? avatarRect.left + avatarRect.width / 2 : window.innerWidth * 0.15
-      const startY = avatarRect ? avatarRect.top + avatarRect.height / 2 : 120
+      const spriteEl = avatarEl?.querySelector('.character-sprite-box') || avatarEl
+      const avatarRect = (spriteEl || avatarEl)?.getBoundingClientRect()
+      const startX = avatarRect ? avatarRect.left + avatarRect.width / 2 : window.innerWidth * 0.18
+      const startY = avatarRect ? avatarRect.top + avatarRect.height / 2 : window.innerHeight * 0.35
 
       const beams: AvatarSkillBeam[] = []
       pairs.forEach((pair, pIdx) => {
@@ -3267,7 +3321,7 @@ export function MirrorRushGame() {
     setIsScrambling(true)
     setTimeout(() => setIsScrambling(false), 550)
 
-    const next = ensureSolvableBoard(board, dims.rows, dims.cols)
+    const next = ensureSolvableBoard(board, dims.rows, dims.cols, true)
     setBoard(next)
     setSelected(null)
     setHintPair(null)
@@ -4172,23 +4226,35 @@ export function MirrorRushGame() {
         </div>
       )}
 
-      {/* 💥 Hiệu Ứng Cut-in Arcade Chiêu Thức Cuối (Floating Banner - Không Che Bàn Cờ) */}
+      {/* 💥 Hiệu Ứng Cut-in Arcade Chiêu Thức Cuối (Căn Giữa Chuẩn Xác, Hiệu Ứng Riêng Biệt Từng Tướng) */}
       {ultimateCutin && ultimateCutin.active && (
-        <div className="ultimate-cutin-overlay">
-          <div className="ultimate-cutin-content" style={{ background: ultimateCutin.character.ultimate.bannerColor }}>
-            <div className="ultimate-cutin-character">
-              <CharacterAvatar
-                characterId={ultimateCutin.character.id}
-                emotion="combo"
-                size="md"
-                useVideo={useVideoAvatar}
-                interactive={false}
-              />
+        <div className={`ultimate-cutin-overlay char-${ultimateCutin.character.id}`}>
+          <div className="ultimate-cutin-backdrop" />
+          <div className={`ultimate-cutin-content char-cutin-${ultimateCutin.character.id}`}>
+            {/* Hiệu ứng nền đặc trưng từng nhân vật */}
+            <div className={`cutin-elemental-burst-bg elem-${ultimateCutin.character.id}`} />
+
+            <div className="ultimate-cutin-header">
+              <div className="ultimate-cutin-character">
+                <CharacterAvatar
+                  characterId={ultimateCutin.character.id}
+                  emotion="combo"
+                  size="md"
+                  useVideo={useVideoAvatar}
+                  interactive={false}
+                />
+              </div>
+              <div className="ultimate-cutin-badge">
+                <span className="cutin-char-name">{ultimateCutin.character.name.toUpperCase()}</span>
+                <span className="cutin-char-badge-tag">{ultimateCutin.character.title}</span>
+              </div>
             </div>
+
             <div className="ultimate-cutin-text">
               <div className="ultimate-cutin-title">
-                <span>{ultimateCutin.character.ultimate.icon}</span>
-                <span>{ultimateCutin.character.ultimate.name}</span>
+                <span className="cutin-title-icon">{ultimateCutin.character.ultimate.icon}</span>
+                <span className="cutin-title-name">{ultimateCutin.character.ultimate.name}</span>
+                <span className="cutin-title-icon">{ultimateCutin.character.ultimate.icon}</span>
               </div>
               <div className="ultimate-cutin-quote">
                 "{ultimateCutin.character.ultimate.voiceLine}"
@@ -4197,6 +4263,9 @@ export function MirrorRushGame() {
                 {ultimateCutin.character.ultimate.description}
               </div>
             </div>
+
+            {/* Vệt năng lượng tia sáng quét ngang phía dưới */}
+            <div className={`cutin-energy-streak streak-${ultimateCutin.character.id}`} />
           </div>
         </div>
       )}
@@ -4925,17 +4994,90 @@ export function MirrorRushGame() {
               <div style={{
                 background: 'rgba(0,0,0,0.4)',
                 border: '1px solid rgba(250,204,21,0.3)',
-                borderRadius: '10px',
-                padding: '6px 14px',
+                borderRadius: '12px',
+                padding: '8px 16px',
                 display: 'flex',
                 alignItems: 'center',
                 gap: '8px'
               }}>
-                <span style={{ fontSize: '12px', color: '#94a3b8' }}>Tiến độ:</span>
-                <strong style={{ color: '#facc15', fontSize: '13px' }}>
+                <span style={{ fontSize: '14.5px', color: '#cbd5e1', fontWeight: 700 }}>Tiến độ:</span>
+                <strong style={{ color: '#facc15', fontSize: '16px', fontWeight: 950 }}>
                   {Object.keys(campaignProgress).length}/15 Ải
                 </strong>
               </div>
+            </div>
+          </div>
+
+          {/* CHỌN CHẾ ĐỘ BÀN ĐẤU CHIẾN DỊCH (CHUNG BÀN HOẶC KHÁC BÀN) */}
+          <div className="campaign-board-mode-banner" style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: '12px',
+            padding: '14px 20px',
+            background: 'linear-gradient(135deg, rgba(15, 23, 42, 0.88) 0%, rgba(30, 41, 59, 0.85) 100%)',
+            borderRadius: '18px',
+            border: '1.5px solid rgba(250, 204, 21, 0.4)',
+            boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+            margin: '12px 0 16px',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <span style={{ fontSize: '28px' }}>⚔️</span>
+              <div>
+                <div style={{ fontSize: '15.5px', fontWeight: 950, color: '#f8fafc', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span>HÌNH THỨC ĐẤU BOSS CHIẾN DỊCH:</span>
+                  <span style={{
+                    fontSize: '13px',
+                    padding: '3px 10px',
+                    borderRadius: '8px',
+                    background: boardMode === 'shared' ? 'rgba(56, 189, 248, 0.25)' : 'rgba(250, 204, 21, 0.25)',
+                    color: boardMode === 'shared' ? '#38bdf8' : '#facc15',
+                    border: `1.5px solid ${boardMode === 'shared' ? 'rgba(56, 189, 248, 0.5)' : 'rgba(250, 204, 21, 0.5)'}`,
+                    fontWeight: 900,
+                  }}>
+                    {boardMode === 'shared' ? '👥 CHUNG 1 BÀN (TRANH CƯỚP CỜ)' : '⚡ KHÁC BÀN (2 BÀN RIÊNG BIỆT)'}
+                  </span>
+                </div>
+                <div style={{ fontSize: '14px', color: '#cbd5e1', marginTop: '4px', lineHeight: 1.5, fontWeight: 600 }}>
+                  {boardMode === 'shared'
+                    ? 'Bạn và Boss cùng dọn trên 1 ma trận duy nhất ở giữa! Ai nhanh tay hơn sẽ cướp cặp cờ trước đối thủ.'
+                    : 'Bạn và Boss đua trên 2 ma trận độc lập ở 2 bên! Ai dọn sạch bảng trước sẽ giành chiến thắng quyết định.'}
+                </div>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button
+                className={`lobby-option-btn ${boardMode === 'shared' ? 'active' : ''}`}
+                onClick={() => setBoardMode('shared')}
+                style={{
+                  padding: '9px 18px',
+                  fontSize: '14.5px',
+                  fontWeight: 900,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  borderRadius: '12px',
+                }}
+              >
+                <span>👥 Chung 1 Bàn</span>
+              </button>
+              <button
+                className={`lobby-option-btn ${boardMode === 'separate' ? 'active' : ''}`}
+                onClick={() => setBoardMode('separate')}
+                style={{
+                  padding: '9px 18px',
+                  fontSize: '14.5px',
+                  fontWeight: 900,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  borderRadius: '12px',
+                }}
+              >
+                <span>⚡ Khác Bàn (2 Bàn)</span>
+              </button>
             </div>
           </div>
 
@@ -4957,7 +5099,7 @@ export function MirrorRushGame() {
                   <span className="campaign-tab-badge">{ch.badge}</span>
                   <div className="campaign-tab-text">
                     <span className="campaign-tab-name">{ch.title.split(':')[0]}</span>
-                    <span className="campaign-tab-desc" style={{ color: isActive ? ch.accentColor : '#94a3b8' }}>
+                    <span className="campaign-tab-desc" style={{ color: isActive ? ch.accentColor : '#cbd5e1' }}>
                       {clearedCount}/3 Ải Đã Chinh Phục
                     </span>
                   </div>
@@ -4976,10 +5118,10 @@ export function MirrorRushGame() {
             }}
           >
             <div className="chapter-banner-top">
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <span style={{ fontSize: '24px' }}>{curChapter.badge}</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <span style={{ fontSize: '28px' }}>{curChapter.badge}</span>
                 <div>
-                  <h2 style={{ margin: 0, fontSize: '17px', fontWeight: 900, color: '#ffffff' }}>
+                  <h2 style={{ margin: 0, fontSize: '22px', fontWeight: 950, color: '#ffffff' }}>
                     {curChapter.title}: {curChapter.subtitle}
                   </h2>
                   <div className="chapter-location-tag" style={{ display: 'inline-block', marginTop: '4px' }}>
@@ -4989,19 +5131,19 @@ export function MirrorRushGame() {
               </div>
 
               <div style={{
-                background: 'rgba(0,0,0,0.5)',
-                border: '1px solid rgba(255,255,255,0.15)',
-                borderRadius: '10px',
-                padding: '6px 12px',
-                fontSize: '11.5px',
+                background: 'rgba(0,0,0,0.55)',
+                border: '1.5px solid rgba(255,255,255,0.2)',
+                borderRadius: '12px',
+                padding: '8px 16px',
+                fontSize: '14.5px',
                 color: '#facc15',
-                fontWeight: 800,
+                fontWeight: 900,
               }}>
                 🎁 Thưởng Chương: +{curChapter.completionRewardCoins} Xu & {curChapter.completionRewardTitle}
               </div>
             </div>
 
-            <p className="chapter-story-desc" style={{ margin: '6px 0 0' }}>
+            <p className="chapter-story-desc" style={{ margin: '8px 0 0' }}>
               {curChapter.storySummary}
             </p>
           </div>
@@ -5054,8 +5196,8 @@ export function MirrorRushGame() {
                       </div>
                       <div className="boss-profile-name" title={stage.bossName}>{stage.bossName}</div>
                       <div className="boss-profile-title">{stage.title}</div>
-                      <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '3px' }}>
-                        ⏱️ Giới hạn: {stage.targetTime}s · Tốc độ đánh: {(stage.moveDelayMin / 1000).toFixed(1)}s
+                      <div style={{ fontSize: '13.5px', color: '#cbd5e1', marginTop: '4px', fontWeight: 700 }}>
+                        ⏱️ Giới hạn: <strong style={{ color: '#ffffff' }}>{stage.targetTime}s</strong> · Tốc độ đánh: <strong style={{ color: '#facc15' }}>{(stage.moveDelayMin / 1000).toFixed(1)}s</strong>
                       </div>
                     </div>
                   </div>
@@ -5065,7 +5207,7 @@ export function MirrorRushGame() {
                   </div>
 
                   <div className="boss-mechanic-box">
-                    <span style={{ fontSize: '15px' }}>{stage.bossSkillIcon}</span>
+                    <span style={{ fontSize: '17px' }}>{stage.bossSkillIcon}</span>
                     <div>
                       <strong>{stage.bossSkillName}:</strong> {stage.bossSkillDesc}
                     </div>
@@ -5073,7 +5215,7 @@ export function MirrorRushGame() {
 
                   <div className="boss-card-footer">
                     <div className="boss-reward-pill">
-                      <Coins size={14} color="#facc15" />
+                      <Coins size={16} color="#facc15" />
                       <span>+{stage.rewardCoins} Xu</span>
                     </div>
 
@@ -5083,7 +5225,7 @@ export function MirrorRushGame() {
                       onClick={() => setStoryModalStage(stage)}
                     >
                       <span>CỐT TRUYỆN & VÀO TRẬN</span>
-                      <ArrowRight size={14} />
+                      <ArrowRight size={16} />
                     </button>
                   </div>
                 </div>
@@ -5132,36 +5274,74 @@ export function MirrorRushGame() {
                 </div>
 
                 <div className="story-modal-skill-warning">
-                  <span style={{ fontSize: '20px' }}>{storyModalStage.bossSkillIcon}</span>
+                  <span style={{ fontSize: '22px' }}>{storyModalStage.bossSkillIcon}</span>
                   <div>
-                    <strong style={{ color: '#ffffff' }}>Tuyệt Kỹ Boss: {storyModalStage.bossSkillName}</strong>
-                    <div style={{ color: '#cbd5e1', fontSize: '11px', marginTop: '1px' }}>
+                    <strong style={{ color: '#ffffff', fontSize: '16px' }}>Tuyệt Kỹ Boss: {storyModalStage.bossSkillName}</strong>
+                    <div style={{ color: '#f1f5f9', fontSize: '14px', marginTop: '3px', lineHeight: 1.45, fontWeight: 600 }}>
                       {storyModalStage.bossSkillDesc} (Tung chiêu mỗi {storyModalStage.bossSkillInterval}s)
                     </div>
                   </div>
                 </div>
 
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px', color: '#94a3b8', paddingTop: '4px' }}>
-                  <span>⏱️ Thời gian: <strong style={{ color: '#f8fafc' }}>{storyModalStage.targetTime}s</strong></span>
-                  <span>🎁 Phần thưởng: <strong style={{ color: '#facc15' }}>+{storyModalStage.rewardCoins} Xu</strong></span>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '15px', color: '#cbd5e1', paddingTop: '6px', fontWeight: 700 }}>
+                  <span>⏱️ Thời gian: <strong style={{ color: '#ffffff', fontSize: '16px' }}>{storyModalStage.targetTime}s</strong></span>
+                  <span>🎁 Phần thưởng: <strong style={{ color: '#facc15', fontSize: '16px' }}>+{storyModalStage.rewardCoins} Xu</strong></span>
+                </div>
+
+                {/* Chọn Chế Độ Đấu Boss: Chung Bàn hoặc Khác Bàn */}
+                <div style={{
+                  background: 'rgba(15, 23, 42, 0.75)',
+                  border: '1.5px solid rgba(255, 255, 255, 0.18)',
+                  borderRadius: '14px',
+                  padding: '12px 16px',
+                  margin: '10px 0 4px',
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                    <span style={{ fontSize: '14.5px', fontWeight: 950, color: '#f8fafc' }}>
+                      🎮 HÌNH THỨC CHIẾN ĐẤU:
+                    </span>
+                    <span style={{ fontSize: '13px', color: '#facc15', fontWeight: 900 }}>
+                      {boardMode === 'shared' ? '👥 Chung 1 Bàn' : '⚡ 2 Bàn Riêng'}
+                    </span>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                    <button
+                      type="button"
+                      className={`lobby-option-btn ${boardMode === 'shared' ? 'active' : ''}`}
+                      onClick={() => setBoardMode('shared')}
+                      style={{ padding: '10px 12px', borderRadius: '12px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '3px', textAlign: 'center' }}
+                    >
+                      <strong style={{ fontSize: '14.5px', fontWeight: 950 }}>👥 Chung 1 Bàn</strong>
+                      <span style={{ fontSize: '12px', opacity: 0.9, fontWeight: 600 }}>Tranh cướp cờ trực tiếp</span>
+                    </button>
+                    <button
+                      type="button"
+                      className={`lobby-option-btn ${boardMode === 'separate' ? 'active' : ''}`}
+                      onClick={() => setBoardMode('separate')}
+                      style={{ padding: '10px 12px', borderRadius: '12px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '3px', textAlign: 'center' }}
+                    >
+                      <strong style={{ fontSize: '14.5px', fontWeight: 950 }}>⚡ Khác Bàn (2 Bàn)</strong>
+                      <span style={{ fontSize: '12px', opacity: 0.9, fontWeight: 600 }}>Đua tốc độ dọn bàn riêng</span>
+                    </button>
+                  </div>
                 </div>
               </div>
 
               <div className="story-modal-actions">
                 <button
                   className="action-btn"
-                  style={{ background: 'rgba(255,255,255,0.1)', color: '#f8fafc', border: '1px solid rgba(255,255,255,0.2)' }}
+                  style={{ background: 'rgba(255,255,255,0.1)', color: '#f8fafc', border: '1px solid rgba(255,255,255,0.2)', fontSize: '15px', padding: '10px 20px', fontWeight: 800 }}
                   onClick={() => setStoryModalStage(null)}
                 >
                   Đóng
                 </button>
                 <button
                   className="boss-battle-btn"
-                  style={{ padding: '10px 22px', fontSize: '13px' }}
+                  style={{ padding: '12px 24px', fontSize: '15.5px', fontWeight: 950 }}
                   onClick={() => startCampaignMatch(storyModalStage)}
                 >
                   <span>⚔️ VÀO TRẬN KHIÊU CHIẾN</span>
-                  <Play size={15} />
+                  <Play size={16} />
                 </button>
               </div>
             </div>
@@ -5988,8 +6168,8 @@ export function MirrorRushGame() {
 
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
           {user && (
-            <div className="coins-badge" style={{ padding: '3px 10px', fontSize: '12px' }}>
-              <Coins size={13} color="#facc15" />
+            <div className="coins-badge" style={{ padding: '4px 12px', fontSize: '13.5px' }}>
+              <Coins size={14} color="#facc15" />
               <span>{coins.toLocaleString()} Xu</span>
             </div>
           )}
@@ -5997,13 +6177,15 @@ export function MirrorRushGame() {
           <span className="game-mode-tag">
             {playMode === 'solo'
               ? 'Chơi Đơn (Solo)'
-              : playMode === 'pvp-bot'
-                ? `Đấu Bot AI · ${boardMode === 'shared' ? 'Chung Bảng' : 'Riêng Bảng'}`
-                : `PVP Online · ${boardMode === 'shared' ? 'Chung Bảng' : 'Riêng Bảng'}`}
+              : playMode === 'campaign'
+                ? `👑 Chiến Dịch 5 Chương · ${boardMode === 'shared' ? 'Chung Bảng (Tranh Cướp)' : 'Khác Bảng (2 Bàn Riêng)'}`
+                : playMode === 'pvp-bot'
+                  ? `Đấu Bot AI · ${boardMode === 'shared' ? 'Chung Bảng' : 'Riêng Bảng'}`
+                  : `PVP Online · ${boardMode === 'shared' ? 'Chung Bảng' : 'Riêng Bảng'}`}
           </span>
 
           {roomCode && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'rgba(250,204,21,0.15)', padding: '4px 10px', borderRadius: '9999px', border: '1px solid rgba(250,204,21,0.4)', fontSize: '12px', fontWeight: 800, color: '#facc15' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'rgba(250,204,21,0.18)', padding: '5px 12px', borderRadius: '9999px', border: '1px solid rgba(250,204,21,0.5)', fontSize: '13.5px', fontWeight: 850, color: '#facc15' }}>
               <span>Phòng: {roomCode}</span>
               <button
                 onClick={() => {
@@ -6011,9 +6193,9 @@ export function MirrorRushGame() {
                   setCopiedCode(true)
                   setTimeout(() => setCopiedCode(false), 2000)
                 }}
-                style={{ background: 'none', border: 'none', color: '#facc15' }}
+                style={{ background: 'none', border: 'none', color: '#facc15', cursor: 'pointer' }}
               >
-                {copiedCode ? <Check size={13} /> : <Copy size={13} />}
+                {copiedCode ? <Check size={14} /> : <Copy size={14} />}
               </button>
             </div>
           )}
@@ -6195,8 +6377,8 @@ export function MirrorRushGame() {
             )
           })()}
 
-          {/* CỘT TAY TRÁI KHI CHƠI BÀN CHUNG (PVP BOT HOẶC PVP ONLINE) */}
-          {playMode !== 'solo' && playMode !== 'campaign' && (
+          {/* CỘT TAY TRÁI KHI CHƠI BÀN CHUNG (PVP BOT, PVP ONLINE, CHIẾN DỊCH CAMPAIGN) */}
+          {playMode !== 'solo' && (
             <div className="pvp-avatar-column">
               <div className="pvp-avatar-card is-player">
                 <CharacterAvatar
@@ -6407,7 +6589,7 @@ export function MirrorRushGame() {
             <div className="pvp-avatar-column">
               <div className={`pvp-avatar-card is-rival ${playMode === 'campaign' ? 'is-boss-rival' : playMode === 'pvp-bot' ? 'is-bot-rival' : ''}`}>
                 {playMode === 'campaign' && currentCampaignStage ? (
-                  <div className="arena-boss-avatar-wrapper">
+                  <div className="arena-boss-avatar-wrapper" id="rival-active-avatar">
                     <div className="arena-boss-aura" />
                     <img
                       src={getSpriteUrl(currentCampaignStage.bossPokemonId, 'artwork')}
@@ -6416,7 +6598,7 @@ export function MirrorRushGame() {
                     />
                   </div>
                 ) : playMode === 'pvp-bot' ? (
-                  <div className="arena-bot-avatar-wrapper">
+                  <div className="arena-bot-avatar-wrapper" id="rival-active-avatar">
                     <img
                       src={getSpriteUrl(curBot.pokemonId, 'artwork')}
                       alt={curBot.name}
@@ -6490,7 +6672,7 @@ export function MirrorRushGame() {
           </div>
 
           {/* Cột Trái: Bảng của BẠN */}
-          <div className={`board-frame ${isMeFrozen ? 'is-frozen' : ''} ${isMeFogged ? 'is-fogged' : ''} ${combo >= 2 ? 'combo-on-fire' : ''} ${equipped.boardTheme} ${equipped.boardFrame}`}>
+          <div className={`board-frame ${isMeFrozen ? 'is-frozen' : ''} ${isMeFogged ? 'is-fogged' : ''} ${combo >= 2 ? 'combo-on-fire' : ''} ${equipped.boardTheme} ${equipped.boardFrame} ${playMode === 'campaign' && currentCampaignStage ? `chapter-env-${currentCampaignStage.chapterEnvEffect}` : ''}`}>
             {isMeFrozen && <div className="debuff-banner">❄ BẠN ĐANG BỊ ĐÓNG BĂNG!</div>}
             {isMeFogged && <div className="debuff-banner" style={{ color: '#94a3b8', borderColor: '#94a3b8' }}>🌫 BỊ MÙ SƯƠNG!</div>}
             {combo >= 2 && (
@@ -6675,24 +6857,39 @@ export function MirrorRushGame() {
             </div>
           </div>
 
-          {/* Cột Phải: Bảng của ĐỐI THỦ */}
-          <div className={`board-frame ${isRivalFrozen ? 'is-frozen' : ''} ${isRivalFogged ? 'is-fogged' : ''}`}>
+          {/* Cột Phải: Bảng của ĐỐI THỦ / BOSS */}
+          <div className={`board-frame ${isRivalFrozen ? 'is-frozen' : ''} ${isRivalFogged ? 'is-fogged' : ''} ${playMode === 'campaign' && currentCampaignStage ? `chapter-env-${currentCampaignStage.chapterEnvEffect}` : ''}`}>
             {isRivalFrozen && <div className="debuff-banner">❄ ĐỐI THỦ BỊ ĐÓNG BĂNG!</div>}
             {isRivalFogged && <div className="debuff-banner" style={{ color: '#94a3b8', borderColor: '#94a3b8' }}>🌫 ĐỐI THỦ BỊ MÙ SƯƠNG!</div>}
 
             <div className="board-header">
               <div className="board-player-info">
-                <CharacterAvatar
-                  characterId={rivalCharacterId}
-                  emotion={rivalEmotion}
-                  size="sm"
-                  showSpeech={rivalEmotion !== 'idle'}
-                  useVideo={useVideoAvatar}
-                />
-                <span>{playMode === 'pvp-bot' ? `${curBot.name} (MÁY · CẤP ${curBot.level})` : (rivalName ? `${rivalName} (ĐỐI THỦ)` : 'Chờ người thứ 2... (TRỐNG)')}</span>
+                {playMode === 'campaign' && currentCampaignStage ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <img
+                      src={getSpriteUrl(currentCampaignStage.bossPokemonId, 'artwork')}
+                      alt={currentCampaignStage.bossName}
+                      style={{ width: '26px', height: '26px', objectFit: 'contain' }}
+                    />
+                    <span style={{ fontWeight: 900, color: '#fca5a5' }}>
+                      👑 {currentCampaignStage.bossName} (BOSS)
+                    </span>
+                  </div>
+                ) : (
+                  <>
+                    <CharacterAvatar
+                      characterId={rivalCharacterId}
+                      emotion={rivalEmotion}
+                      size="sm"
+                      showSpeech={rivalEmotion !== 'idle'}
+                      useVideo={useVideoAvatar}
+                    />
+                    <span>{playMode === 'pvp-bot' ? `${curBot.name} (MÁY · CẤP ${curBot.level})` : (rivalName ? `${rivalName} (ĐỐI THỦ)` : 'Chờ người thứ 2... (TRỐNG)')}</span>
+                  </>
+                )}
               </div>
               <div className="board-score-pill" style={{ color: '#f43f5e' }}>
-                {playMode === 'pvp-bot' ? `${rivalScore} ĐIỂM` : (rivalName ? `${rivalScore} ĐIỂM` : 'TRỐNG')}
+                {playMode === 'campaign' ? `${rivalScore} ĐIỂM` : playMode === 'pvp-bot' ? `${rivalScore} ĐIỂM` : (rivalName ? `${rivalScore} ĐIỂM` : 'TRỐNG')}
               </div>
             </div>
 

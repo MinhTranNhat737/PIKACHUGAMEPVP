@@ -18,13 +18,14 @@ export async function GET(
 ) {
   try {
     const { code } = await params
-    const room = getRoom(code)
+    const url = new URL(req.url)
+    const playerId = url.searchParams.get('playerId') || undefined
+    const room = getRoom(code, playerId)
     if (!room) {
       return NextResponse.json({ success: false, error: 'Phòng không tồn tại' }, { status: 404, headers: NOCACHE_HEADERS })
     }
 
     // Conditional sync: if client sends ?since=<timestamp> and room hasn't changed, return minimal response
-    const url = new URL(req.url)
     const since = Number(url.searchParams.get('since') || 0)
     if (since > 0 && room.updatedAt <= since) {
       return NextResponse.json({ success: true, changed: false, updatedAt: room.updatedAt }, { headers: NOCACHE_HEADERS })

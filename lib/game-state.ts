@@ -739,7 +739,7 @@ function shuffleBoardServer(board: Cell[][], rows: number, cols: number): Cell[]
   return newBoard
 }
 
-export function ensureSolvableBoardServer(board: Cell[][], rows: number, cols: number): Cell[][] {
+export function ensureSolvableBoardServer(board: Cell[][], rows: number, cols: number, forceShuffle: boolean = false): Cell[][] {
   const remainingPositions: Coord[] = []
   const valCount = new Map<number, number>()
 
@@ -785,10 +785,10 @@ export function ensureSolvableBoardServer(board: Cell[][], rows: number, cols: n
     }
   }
 
-  // 2. Nếu bàn cờ hiện tại đã giải được ít nhất 1 cặp thì giữ nguyên
-  if (findAnyPairServer(current, rows, cols)) return current
+  // 2. Nếu không ép buộc xáo trộn và bàn cờ hiện tại đã giải được ít nhất 1 cặp thì giữ nguyên
+  if (!forceShuffle && findAnyPairServer(current, rows, cols)) return current
 
-  // 3. Xáo trộn ngẫu nhiên tối đa 60 lần
+  // 3. Xáo trộn ngẫu nhiên tối đa 60 lần (khi forceShuffle = true: bắt buộc xáo trộn tìm cách xếp mới)
   for (let t = 0; t < 60; t++) {
     current = shuffleBoardServer(current, rows, cols)
     if (findAnyPairServer(current, rows, cols)) return current
@@ -995,6 +995,19 @@ export function joinRoom(
       ? generateBoardData(room.size)
       : hostBoard.map(r => [...r])
 
+    const now = Date.now()
+
+    // BẮT ĐẦU TRẬN ĐẤU MỚI: Reset toàn bộ thông số và làm mới lastActive cho cả 2 người chơi!
+    // Tránh việc host chờ khách vào bàn >15s bị disconnect-check xử thua ngay lập tức
+    room.host.lastActive = now
+    room.host.score = 0
+    room.host.pairsCleared = 0
+    room.host.combo = 0
+    room.host.energy = 0
+    room.host.frozenUntil = 0
+    room.host.fogUntil = 0
+    room.host.immunityUntil = 0
+
     room.guest = {
       id: guestId,
       name: guestName || 'Người chơi 2',
@@ -1007,32 +1020,45 @@ export function joinRoom(
       frozenUntil: 0,
       fogUntil: 0,
       energy: 0,
-      lastActive: Date.now(),
+      lastActive: now,
     }
     room.sharedBoard = room.mode === 'shared' ? hostBoard.map(r => [...r]) : undefined
     room.status = 'playing'
+    room.winnerId = null
     room.lastAction = {
       playerId: guestId,
-      type: 'match',
-      timestamp: Date.now(),
-      message: `🎮 ${guestName || 'Người chơi 2'} đã vào bàn! Bắt đầu tính giờ chiến đấu!`,
+      type: 'shuffle',
+      timestamp: now,
+      message: `🎮 ${guestName || 'Người chơi 2'} đã vào bàn! Trận đấu bắt đầu!`,
     }
-    room.updatedAt = Date.now()
+    room.updatedAt = now
     broadcastRoom(room)
   }
 
   return room
 }
 
-export function getRoom(code: string): RoomState | null {
+export function getRoom(code: string, activePlayerId?: string): RoomState | null {
   const room = rooms.get(code.toUpperCase())
   if (!room) return null
 
+  const now = Date.now()
+
+  // Cập nhật lastActive cho người đang gửi request lên (heartbeat qua SSE hoặc fast polling)
+  if (activePlayerId) {
+    if (room.host.id === activePlayerId) {
+      room.host.lastActive = now
+    } else if (room.guest?.id === activePlayerId) {
+      room.guest.lastActive = now
+    }
+  }
+
   // Tự động kiểm tra mất kết nối / thoát trận (Disconnect detection)
+  // Chỉ kiểm tra khi đang trong trận đấu ('playing')
   if (room.status === 'playing' && room.host && room.guest) {
-    const now = Date.now()
-    const hostInactive = (now - room.host.lastActive) > 15000
-    const guestInactive = (now - room.guest.lastActive) > 15000
+    const DISCONNECT_TIMEOUT = 35000 // 35 giây không có bất kỳ heartbeat polling/hành động nào
+    const hostInactive = (now - room.host.lastActive) > DISCONNECT_TIMEOUT
+    const guestInactive = (now - room.guest.lastActive) > DISCONNECT_TIMEOUT
 
     if (hostInactive && !guestInactive) {
       room.status = 'finished'
@@ -1297,6 +1323,7 @@ export function updatePlayerAction(
     }
   } else if (action.type === 'restart') {
     const newBoard = generateBoardData(room.size)
+    const now = Date.now()
     room.host.board = newBoard.map(r => [...r])
     room.host.score = 0
     room.host.pairsCleared = 0
@@ -1304,6 +1331,7 @@ export function updatePlayerAction(
     room.host.energy = 0
     room.host.frozenUntil = 0
     room.host.fogUntil = 0
+    room.host.lastActive = now
 
     if (room.guest) {
       room.guest.board = room.mode === 'separate' ? generateBoardData(room.size) : newBoard.map(r => [...r])
@@ -1313,6 +1341,7 @@ export function updatePlayerAction(
       room.guest.energy = 0
       room.guest.frozenUntil = 0
       room.guest.fogUntil = 0
+      room.guest.lastActive = now
     }
     if (room.mode === 'shared') {
       room.sharedBoard = newBoard.map(r => [...r])
